@@ -634,5 +634,3 @@ are not implemented in the ASE.db class
 
 """
 ################
-
-
