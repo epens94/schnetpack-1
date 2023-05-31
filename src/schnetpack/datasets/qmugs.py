@@ -178,6 +178,7 @@ class QMugs(AtomsDataModule):
                     'DFT:NUCLEAR_REPULSION_ENERGY',
                     'DFT:ONE_ELECTRON_ENERGY',
                     'DFT:TWO_ELECTRON_ENERGY',
+                    'DFT:NUCLEAR_NUCLEAR_REPULSION_ENERGY'
                     'DFT:HOMO_ENERGY',
                     'DFT:LUMO_ENERGY',
                     'DFT:HOMO_LUMO_GAP',
@@ -404,7 +405,7 @@ class QMugs(AtomsDataModule):
             else:
                 self.dataset_idx_to_conformere_map()
                 print("Done")
-        
+            self._copy_to_workdir()
 
     def dataset_idx_to_conformere_map(self):
 
@@ -415,7 +416,7 @@ class QMugs(AtomsDataModule):
             data = {}
 
             # chemblID to str conversion needed otherwise json object not serializable
-            val = list({db.get(i).id : str(db.get(i).data["CHEMBL_ID"][0]) for i in tqdm(range(1,len(db)+1))}.items())
+            val = list({db.get(i).id -1: str(db.get(i).data["CHEMBL_ID"][0]) for i in tqdm(range(1,len(db)+1))}.items())
             data["QMugs"] = val
             md = db.metadata
             md.update(data)
@@ -635,10 +636,3 @@ are not implemented in the ASE.db class
 ################
 
 
-# db_path = "/home/elron/phd/benchmark_data/QMugs/dbs/qmugs_schnet_FF.db"
-# if os.path.exists(db_path):
-#     os.remove(db_path)
-# with open("/home/elron/phd/benchmark_data/QMugs/single_atomrefs.pkl","rb") as f:
-#     atomrefs = pickle.load(f)
-# qmugs = QMugs(db_path,10,atomrefs=atomrefs)
-# qmugs.prepare_data()################
