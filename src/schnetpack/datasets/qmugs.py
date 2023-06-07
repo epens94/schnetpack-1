@@ -47,6 +47,8 @@ class QMugs(AtomsDataModule):
     The QMugs database contains small organic molecules with up to 100 non-hydrogen atoms
     from including C, O, N, F, P, S, Cl, Br, I. 
 
+    Distance related: The bond distances range from 1.30 Angstrom to 2.35 Angstrom
+
     This class adds convenient functions to download QMugs from ETH Zürich Research collection and load the data into pytorch.
     The wavefunctions are not downloaded
     Additionally it ensures that all conformers of a molecule are assigned to the same set (train, val or test) to avoid data leakage
@@ -396,8 +398,9 @@ class QMugs(AtomsDataModule):
             self._download_data(tmpdir, dataset,predefined_props_flag)
             self.dataset_idx_to_conformere_map()
             shutil.rmtree(tmpdir)
-
+            logging.info(f"remove {tmpdir}")
         else:
+            logging.info(f"loading dataset from {self.datapath}")
             dataset = load_dataset(self.datapath, self.format)
             
             if "QMugs" in list(dataset.metadata.keys()):
@@ -500,7 +503,7 @@ class QMugs(AtomsDataModule):
 
         ### TMP ADDED 
         # 1 get folder names
-        N = 100000
+        N = 1000
         folder = self._flatten_list([ 
             [os.path.join(raw_path,f,r) for r in os.listdir(os.path.join(raw_path,f))]
             for f in tqdm(os.listdir(raw_path))

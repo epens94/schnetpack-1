@@ -77,9 +77,9 @@ class QMugsSplit(SplittingStrategy):
             np.random.permutation(_idxs).tolist() for _idxs in [train_idx, val_idx, test_idx]
             ]
         
-        train_idx = random.sample([d1[n][0] for n in train_idx ],len(train_idx))
-        val_idx = random.sample([d1[n][0] for n in val_idx ],len(val_idx))
-        test_idx = random.sample([d1[n][0] for n in test_idx],len(test_idx))
+        train_idx = random.sample([d1[n][0] for n in train_idx ],split_sizes[0])
+        val_idx = random.sample([d1[n][0] for n in val_idx ],split_sizes[1])
+        test_idx = random.sample([d1[n][0] for n in test_idx],split_sizes[2])
 
         return [train_idx, val_idx, test_idx]
 
