@@ -71,6 +71,7 @@ class Atomwise(nn.Module):
         y = self.outnet(inputs["scalar_representation"])
 
         # accumulate the per-atom output if necessary
+        # [] per atom output key needs to also follow a strict rule if pred_propertyName scheme is implemented
         if self.per_atom_output_key is not None:
             inputs[self.per_atom_output_key] = y
 
@@ -84,7 +85,9 @@ class Atomwise(nn.Module):
             if self.aggregation_mode == "avg":
                 y = y / inputs[properties.n_atoms]
 
-        inputs[self.output_key] = y
+        #[] overwritting of scalar property done here
+        #inputs[self.output_key] = y
+        inputs["pred_"+self.output_key] = y
         return inputs
 
 
