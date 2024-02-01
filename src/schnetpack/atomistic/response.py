@@ -56,8 +56,9 @@ class Forces(nn.Module):
         if self.calc_stress:
             self.required_derivatives.append(properties.strain)
 
+    # [] modify forward function to accept pred_PropertyName scheme as input
     def forward(self, inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        Epred = inputs[self.energy_key]
+        Epred = inputs["pred_"+self.energy_key]
 
         go: List[Optional[torch.Tensor]] = [torch.ones_like(Epred)]
         grads = grad(
@@ -72,8 +73,8 @@ class Forces(nn.Module):
             # TorchScript needs Tensor instead of Optional[Tensor]
             if dEdR is None:
                 dEdR = torch.zeros_like(inputs[properties.R])
-
-            inputs[self.force_key] = -dEdR
+            # input batch forces not overwritten but added with pred_forces key value pair
+            inputs["pred_"+self.force_key] = -dEdR
 
         if self.calc_stress:
             stress = grads[-1]
@@ -87,9 +88,45 @@ class Forces(nn.Module):
                 dim=1,
                 keepdim=True,
             )[:, :, None]
-            inputs[self.stress_key] = stress / volume
-
+            # input batch stress not overwritten but added with pred_stress key value pair
+            inputs["pred_"+self.stress_key] = stress / volume
         return inputs
+
+
+    # def forward(self, inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    #     Epred = inputs[self.energy_key]
+
+    #     go: List[Optional[torch.Tensor]] = [torch.ones_like(Epred)]
+    #     grads = grad(
+    #         [Epred],
+    #         [inputs[prop] for prop in self.required_derivatives],
+    #         grad_outputs=go,
+    #         create_graph=self.training,
+    #     )
+
+    #     if self.calc_forces:
+    #         dEdR = grads[0]
+    #         # TorchScript needs Tensor instead of Optional[Tensor]
+    #         if dEdR is None:
+    #             dEdR = torch.zeros_like(inputs[properties.R])
+
+    #         inputs[self.force_key] = -dEdR
+
+    #     if self.calc_stress:
+    #         stress = grads[-1]
+    #         # TorchScript needs Tensor instead of Optional[Tensor]
+    #         if stress is None:
+    #             stress = torch.zeros_like(inputs[properties.cell])
+
+    #         cell = inputs[properties.cell]
+    #         volume = torch.sum(
+    #             cell[:, 0, :] * torch.cross(cell[:, 1, :], cell[:, 2, :], dim=1),
+    #             dim=1,
+    #             keepdim=True,
+    #         )[:, :, None]
+    #         inputs[self.stress_key] = stress / volume
+
+    #     return inputs
 
 
 class Response(nn.Module):
