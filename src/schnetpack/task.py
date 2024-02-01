@@ -55,19 +55,34 @@ class ModelOutput(nn.Module):
             "test": self.test_metrics,
         }
         self.constraints = constraints or []
+    # original calculate_loss function
+    # def calculate_loss(self, pred, target):
+    #     if self.loss_weight == 0 or self.loss_fn is None:
+    #         return 0.0
 
-    def calculate_loss(self, pred, target):
+    #     loss = self.loss_weight * self.loss_fn(
+    #         pred[self.name], target[self.target_property]
+    #     )
+    #     return loss
+
+    def calculate_loss(self, batch):
         if self.loss_weight == 0 or self.loss_fn is None:
             return 0.0
 
         loss = self.loss_weight * self.loss_fn(
-            pred[self.name], target[self.target_property]
+            batch["pred_"+self.name], batch[self.target_property]
         )
         return loss
 
-    def update_metrics(self, pred, target, subset):
+    # original update_metrics function
+    # def update_metrics(self, pred, target, subset):
+    #     for metric in self.metrics[subset].values():
+    #         metric(pred[self.name], target[self.target_property])
+
+    # updated update_metrics function
+    def update_metrics(self, batch, subset):
         for metric in self.metrics[subset].values():
-            metric(pred[self.name], target[self.target_property])
+            metric(batch["pred_"+self.name], batch[self.target_property])
 
 
 class UnsupervisedModelOutput(ModelOutput):
@@ -139,15 +154,41 @@ class AtomisticTask(pl.LightningModule):
         results = self.model(inputs)
         return results
 
-    def loss_fn(self, pred, batch):
+    #def loss_fn(self, pred, batch):
+        # original loss_fn function
+        # [] if predicted property is additional key value pair in input batch than the mapping to the correct loss functions has to be ensured
+        # [] self.outputs[n] for n of how many output modules, access to name via self.outputs[n].name 
+        # for n, output in ennumerate(self.outputs):
+        #     prop_name = self.outputs[n].name
+        #     loss += output.calculate_loss(batch["pred_"+prop_name, batch[prop_name])
+        #loss = 0.0
+        #for output in self.outputs:
+        #    loss += output.calculate_loss(pred, batch)
+        #return loss
+    
+    def loss_fn(self,batch):
+        # updated loss fn function
         loss = 0.0
         for output in self.outputs:
-            loss += output.calculate_loss(pred, batch)
+            loss += output.calculate_loss(batch)
         return loss
+    # original log_metrics function
+    # def log_metrics(self, pred, targets, subset):
+    #     for output in self.outputs:
+    #         output.update_metrics(pred, targets, subset)
+    #         for metric_name, metric in output.metrics[subset].items():
+    #             self.log(
+    #                 f"{subset}_{output.name}_{metric_name}",
+    #                 metric,
+    #                 on_step=(subset == "train"),
+    #                 on_epoch=(subset != "train"),
+    #                 prog_bar=False,
+    #             )
 
-    def log_metrics(self, pred, targets, subset):
+    # updated log_metrics function
+    def log_metrics(self, batch, subset):
         for output in self.outputs:
-            output.update_metrics(pred, targets, subset)
+            output.update_metrics(batch, subset)
             for metric_name, metric in output.metrics[subset].items():
                 self.log(
                     f"{subset}_{output.name}_{metric_name}",
@@ -157,6 +198,7 @@ class AtomisticTask(pl.LightningModule):
                     prog_bar=False,
                 )
 
+
     def apply_constraints(self, pred, targets):
         for output in self.outputs:
             for constraint in output.constraints:
@@ -164,7 +206,7 @@ class AtomisticTask(pl.LightningModule):
         return pred, targets
 
     def training_step(self, batch, batch_idx):
-
+        # [] getting targets is not needed if the predicted property is added as key value pair to original input batch dict
         targets = {
             output.target_property: batch[output.target_property]
             for output in self.outputs
@@ -178,15 +220,18 @@ class AtomisticTask(pl.LightningModule):
         pred = self.predict_without_postprocessing(batch)
         pred, targets = self.apply_constraints(pred, targets)
 
-        loss = self.loss_fn(pred, targets)
+        #original loss fn
+        #loss = self.loss_fn(pred, targets)
+        loss = self.loss_fn(batch)
 
         self.log("train_loss", loss, on_step=True, on_epoch=False, prog_bar=False)
-        self.log_metrics(pred, targets, "train")
+        #self.log_metrics(pred, targets, "train")
+        self.log_metrics(batch, "train")
         return loss
 
     def validation_step(self, batch, batch_idx):
         torch.set_grad_enabled(self.grad_enabled)
-
+        # [] getting targets is not needed if the predicted property is added as key value pair to original input batch dict
         targets = {
             output.target_property: batch[output.target_property]
             for output in self.outputs
@@ -196,14 +241,19 @@ class AtomisticTask(pl.LightningModule):
             targets["considered_atoms"] = batch["considered_atoms"]
         except:
             pass
-
+        
+        # [] avoid to assign batch to pred variable, because they are the same
         pred = self.predict_without_postprocessing(batch)
+        # [] update apply_constraints 
         pred, targets = self.apply_constraints(pred, targets)
 
-        loss = self.loss_fn(pred, targets)
+        loss = self.loss_fn(batch)
+        #original loss fn
+        #loss = self.loss_fn(pred, targets)
 
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log_metrics(pred, targets, "val")
+        #self.log_metrics(pred, targets, "val")
+        self.log_metrics(batch, "val")
 
         return {"val_loss": loss}
 
