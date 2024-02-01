@@ -179,10 +179,11 @@ class NeuralNetworkPotential(AtomisticModel):
         inputs = self.representation(inputs)
 
         for m in self.output_modules:
-            inputs = m(inputs)
+            inputs = m(inputs) # property is here overwritten
 
         # apply postprocessing (if enabled)
         inputs = self.postprocess(inputs)
-        results = self.extract_outputs(inputs)
-
-        return results
+        # [] extract outputs not needed if predicted property is added as key value pair to original input batch dict
+        #results = self.extract_outputs(inputs)
+        return inputs
+        #return results
