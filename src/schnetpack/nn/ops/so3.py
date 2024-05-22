@@ -222,3 +222,4 @@ def to_scalar_feature_norm(v1: torch.Tensor, axis=0) -> torch.Tensor:
     x = torch.sum(v1 ** 2, axis=axis, keepdims=True)
 
     return torch.squeeze(torch.where(x, torch.sqrt(x), x), axis)
+#test
