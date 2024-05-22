@@ -2,9 +2,9 @@ import math
 import torch
 from sympy.physics.wigner import clebsch_gordan
 
-from functools import lru_cache
-from typing import Tuple
-
+from functools import lru_cache, partial
+from typing import Tuple, Callable, List
+from itertools import it
 
 @lru_cache(maxsize=10)
 def sh_indices(lmax: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -138,3 +138,87 @@ def round_cmp(x: torch.Tensor, decimals: int = 1):
     return torch.round(x.real, decimals=decimals) + 1j * torch.round(
         x.imag, decimals=decimals
     )
+
+
+def make_degree_sum_fn(degrees: List[int]) -> Callable[[torch.Tensor], torch.Tensor]:
+    """
+    Make function that calculates the sum across the orders for each degree l in an SPHC vector.
+
+    Args:
+        degrees (List): List of degrees l.
+
+    Returns: function that takes a vector of `shape=m_tot` as input and returns a vector of `shape=n_l` which corresponds
+        to the sum across each degree l.
+    """
+    # Create segment_ids similar to the original JAX code
+    segment_ids = torch.tensor([y for y in it.chain(*[[n] * (2 * degrees[n] + 1) for n in range(len(degrees))])])
+    num_segments = len(degrees)
+
+    def degree_sum(x: torch.Tensor, segment_ids: torch.Tensor, num_segments: int) -> torch.Tensor:
+        """
+        Sum the elements of the input tensor x across the orders for each degree.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape `m_tot`.
+            segment_ids (torch.Tensor): Tensor of segment IDs.
+            num_segments (int): Number of segments.
+
+        Returns:
+            torch.Tensor: Output tensor of shape `n_l`.
+        """
+        result = torch.zeros(num_segments, dtype=x.dtype, device=x.device)
+        result.scatter_add_(0, segment_ids, x)
+        return result
+
+    return partial(degree_sum, segment_ids=segment_ids, num_segments=num_segments)
+
+
+
+def make_degree_norm_fn(degrees: List[int]) -> Callable[[torch.Tensor], torch.Tensor]:
+    """
+    Make function that calculates the norm for each degree l on an SPHC vector.
+
+    Args:
+        degrees (List): Sequence of degrees l.
+
+    Returns: function that takes vector of `shape=m_tot` as input and returns vector of `shape=n_l` which corresponds
+        to the norm for each degree l.
+
+    """
+    per_degree_sum = make_degree_sum_fn(degrees)
+
+    def fn(_x):
+        _y = per_degree_sum(_x**2)
+        return torch.where(_y > 0, torch.sqrt(_y), 0)
+
+    return fn
+
+
+def to_scalar_feature_inner_product(v1: torch.Tensor, v2: torch.Tensor) -> torch.Tensor:
+    """
+    Calculate scalar feature representation from equivariant features.
+
+    Args:
+        v1 (Array): First equivariant feature, shape: (...,3,F)
+        v2 (Array): Second equivariant feature, shape: (...,3,F)
+
+    Returns: Scalar feature, shape: (...,F)
+
+    """
+    return torch.einsum('...mi, ...mi -> ...i', v1, v2)
+
+
+def to_scalar_feature_norm(v1: torch.Tensor, axis=0) -> torch.Tensor:
+    """
+
+    Args:
+        v1 (Array): Equivariant feature, shape: (...,F)
+        axis (Array): Along which dimension to take the norm
+
+    Returns:
+
+    """
+
+    x = torch.sum(v1 ** 2, axis=axis, keepdims=True)
+
+    return torch.squeeze(torch.where(x, torch.sqrt(x), x), axis)
