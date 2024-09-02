@@ -9,7 +9,7 @@ from torch.nn import functional as F
 import schnetpack.properties as structure
 from schnetpack.nn import ElectronicEmbedding
 from schnetpack.nn.activations import shifted_softplus
-from schnetpack.nn.ops.spherical import order_contraction, make_l0_contraction_fn, interaction_order_contraction
+from schnetpack.nn.ops.spherical import order_contraction, make_l0_contraction_fn, interaction_order_contraction, wrapper_make_degree_norm
 from schnetpack.nn.utils import equal_head_split#, inv_split
 
 
@@ -321,6 +321,7 @@ class So3kratesLayer(nn.Module):
         self.record["features_in"] = x
         m_chi_ij = order_contraction(chi,idx_j,idx_i,self.degrees) # shape: (n_pairs, |l|)
         # apply pre layer normalization (for conv layer it may destroys spatial dependency)
+        m_chi_ij = wrapper_make_degree_norm(chi,idx_j,idx_i,self.degrees)
         x_pre_1 = self.layer_normalization(x)
         # calculate phi_chi_cut
         phi_chi_cut = self.chi_cut_fn_dynamic(m_chi_ij)#[:,None] # TODO make sure that shape is consistent (npairs,1)
