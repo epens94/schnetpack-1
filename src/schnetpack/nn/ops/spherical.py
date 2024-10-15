@@ -11,6 +11,8 @@ calculation of real spherical harmonics
 x,y,z are normalized unit vector (aka x/r, y/r, z/r, with r = sqrt(x^2 + y^2 + z^2)
 '''
 
+
+
 # TODO: probabily contains stuff already present 
 # in so3Net, check if both can be combined, but for now keep
 # needs the provided cgmatrix.npz file
@@ -196,9 +198,33 @@ def init_sph_fn(l: int):
 
 indx_fn = lambda x: int((x+1)**2) if x >= 0 else 0
 
+
+def construct_cg_matrix(degrees):
+
+    # get CG coefficients
+    cg = torch.diagonal(init_clebsch_gordan_matrix(degrees=torch.tensor(list({0, *degrees})), l_out_max=0), dim1=1, dim2=2)[0]
+    # shape: (m_tot**2)
+    # if 0 not in degrees:
+    #     cg = cg[1:]  # remove degree zero if not in degrees
+
+    cg_rep = []
+    #reps = [(d,degrees.count(d)) for d in set(degrees)]
+
+    for d, r in zip(*torch.unique(degrees, return_counts=True)):
+        cg_rep += [torch.tile(cg[indx_fn(d - 1): indx_fn(d)], (r,))]
+
+    cg_rep = torch.concatenate(cg_rep)  # shape: (m_tot), m_tot = \sum_l 2l+1 for l in degrees
+
+    segment_ids = torch.tensor(
+        [y for y in it.chain(*[[n] * int(2 * degrees[n] + 1) for n in range(len(degrees))])], dtype=torch.long, device=degrees.device)  # shape: (m_tot
+    num_segments = len(degrees)
+
+    return cg_rep, segment_ids, num_segments
+
+
 def load_cgmatrix(degrees):
     stream = pkg_resources.resource_stream(__name__, 'cgmatrix.npz')
-    return torch.tensor(np.load(stream)['cg'], dtype=torch.float32,device=degrees.device)
+    return torch.tensor(np.load(stream)['cg'], dtype=torch.float32) #,device=degrees.device)
 
 
 def init_clebsch_gordan_matrix(degrees, l_out_max=None):
@@ -230,6 +256,8 @@ def init_clebsch_gordan_matrix(degrees, l_out_max=None):
     _cg = load_cgmatrix(degrees)
     # 0:1, 0:9, 0:9
     return _cg[offset_corr:indx_fn(_l_out_max), offset_corr:indx_fn(l_in_max), offset_corr:indx_fn(l_in_max)]
+
+
 
 
 def make_l0_contraction_fn(degrees):
@@ -284,7 +312,6 @@ def make_degree_norm(degrees):
         return per_degree_norm
     
     return fn
-
 
 
 

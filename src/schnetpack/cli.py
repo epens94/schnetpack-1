@@ -152,7 +152,7 @@ def train(config: DictConfig):
             if "_target_" in lg_conf:
                 log.info(f"Instantiating logger <{lg_conf._target_}>")
                 l = hydra.utils.instantiate(lg_conf)
-
+                l.config = OmegaConf.to_container(config, resolve=True) 
                 logger.append(l)
 
     # Init Lightning trainer
@@ -165,8 +165,12 @@ def train(config: DictConfig):
         _convert_="partial",
     )
 
+
     log.info("Logging hyperparameters.")
-    log_hyperparameters(config=config, model=task, trainer=trainer)
+    sorted_dict = dict(sorted(OmegaConf.to_container(config, resolve=True).items()))
+    # Convert back to OmegaConf
+
+    log_hyperparameters(config=sorted_dict, model=task, trainer=trainer)
 
     # Train the model
     log.info("Starting training.")

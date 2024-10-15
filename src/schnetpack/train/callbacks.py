@@ -126,7 +126,7 @@ class PredictionWriter(BasePredictionWriter):
     ):
         # collect batches of predictions and restructure
         concatenated_predictions = defaultdict(list)
-        for batch_prediction in predictions[0]:
+        for batch_prediction in predictions:
             for property_name, data in batch_prediction.items():
                 if not self.write_idx and property_name == properties.idx_m:
                     continue

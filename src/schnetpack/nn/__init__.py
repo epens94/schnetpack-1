@@ -15,3 +15,4 @@ from schnetpack.nn.utils import *
 from schnetpack.nn.embedding import *
 from schnetpack.nn.attention import *
 from schnetpack.nn.filter import *
+from schnetpack.nn.clebsch_gordon import *

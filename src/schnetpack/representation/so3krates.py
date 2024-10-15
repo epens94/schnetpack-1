@@ -10,6 +10,7 @@ import schnetpack.properties as structure
 from schnetpack.nn import ElectronicEmbedding
 from schnetpack.nn.activations import shifted_softplus
 from schnetpack.nn.ops.spherical import order_contraction, make_l0_contraction_fn, interaction_order_contraction, wrapper_make_degree_norm
+from schnetpack.nn.clebsch_gordon import GlebschGordonMatrix
 from schnetpack.nn.utils import equal_head_split#, inv_split
 
 
@@ -24,6 +25,8 @@ __all__ = [
     'So3krates'
     ]
         
+
+
 
 
 class So3kratesInteractionBlock(nn.Module):
@@ -49,6 +52,8 @@ class So3kratesInteractionBlock(nn.Module):
         self.parity = parity
         num_segments = len(self.degrees)
 
+        self.cg_matrix = GlebschGordonMatrix(degrees=self.degrees)  
+
         self.mixing_layer = snn.Dense(
             in_features=num_features+num_segments,
             out_features=num_features+num_segments,activation=activation,bias=False)
@@ -69,7 +74,8 @@ class So3kratesInteractionBlock(nn.Module):
         split_sizes = [F_,nl]
 
         # contract from (n_atoms, 2l+1) to (n_atoms, |l|)
-        d_chi = interaction_order_contraction(chi,self.degrees)
+        d_chi = self.cg_matrix(chi) # shape: (n,|l|)
+        #d_chi = interaction_order_contraction(chi,self.degrees)
         y = torch.concatenate([x, d_chi], axis=-1)  # shape: (n,F+|l|)
 
         # repeat first degree m_total order times (e.g for l0 its 3, and for l1 its 5) to sum up to total m_tot
@@ -314,14 +320,15 @@ class So3kratesLayer(nn.Module):
             idx_i: torch.Tensor, # shape: (n_pairs,) idx of centering atom i
             x: torch.Tensor,# shape: (n_atoms, F)  atomic features --> eco so aufbauen dass nonlocal features hierzu aufaddiert werden ?
             rbf: torch.Tensor, # shape: (n_pairs,K): rbf expanded distances
-            phi_r_cut: torch.Tensor) -> torch.Tensor:
+            phi_r_cut: torch.Tensor,
+            m_chi_ij: torch.Tensor) -> torch.Tensor:
         
         # create m_tot contracted chi_ij
         self.record["chi_in"] = chi
         self.record["features_in"] = x
-        m_chi_ij = order_contraction(chi,idx_j,idx_i,self.degrees) # shape: (n_pairs, |l|)
+        #m_chi_ij = order_contraction(chi,idx_j,idx_i,self.degrees) # shape: (n_pairs, |l|)
         # apply pre layer normalization (for conv layer it may destroys spatial dependency)
-        m_chi_ij = wrapper_make_degree_norm(chi,idx_j,idx_i,self.degrees)
+        #m_chi_ij = wrapper_make_degree_norm(chi,idx_j,idx_i,self.degrees)
         x_pre_1 = self.layer_normalization(x)
         # calculate phi_chi_cut
         phi_chi_cut = self.chi_cut_fn_dynamic(m_chi_ij)#[:,None] # TODO make sure that shape is consistent (npairs,1)
@@ -488,6 +495,9 @@ class So3krates(nn.Module):
             self.n_interactions,
             False,
         )
+
+        self.cgmatrix = GlebschGordonMatrix(degrees=self.degrees)
+
         #self.reset_parameters()
 
     def helper(self,data,level,device):
@@ -651,6 +661,8 @@ class So3krates(nn.Module):
         #x = torch.tensor(np.load(BASE).squeeze(),device=x.device)
         for so3krates_layer in self.so3krates_layer:
             
+            m_chi_ij = self.cgmatrix(chi,idx_j,idx_i)
+
             v, chi_ = so3krates_layer(
                 sph_ij=sph_ij,
                 chi=chi,
@@ -658,7 +670,8 @@ class So3krates(nn.Module):
                 idx_i=idx_i,
                 x=x,
                 rbf=f_ij,
-                phi_r_cut=rcut_ij
+                phi_r_cut=rcut_ij,
+                m_chi_ij=m_chi_ij
             )
             # the atomic embeddings are overwritten instead of adding the interaction
             # to the init embeddings, this is in contrast to schnet etc.
