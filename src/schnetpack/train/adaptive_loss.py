@@ -1,11 +1,8 @@
-import torch
-from typing import List, Dict, Optional
-import numbers
-
-import numpy as np
-import mpmath
 import os
-from pkg_resources import resource_stream
+import torch
+import numpy as np
+from typing import Optional
+
 
 __all__ = ["AdaptiveLossFunction"]
 

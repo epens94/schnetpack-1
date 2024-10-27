@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import scipy.sparse as sp
 
-__all__ = ["SplittingStrategy", "RandomSplit", "SubsamplePartitions","AtomTypeSplit"]
+__all__ = ["SplittingStrategy", "RandomSplit", "SubsamplePartitions","AtomTypeSplit","QCMLSplit"]
 
 
 def absolute_split_sizes(dsize: int, split_sizes: List[int]) -> List[int]:
@@ -97,6 +97,68 @@ class RandomSplit(SplittingStrategy):
         return partition_sizes_idx
 
 
+class QCMLSplit(SplittingStrategy):
+
+    """
+    Splitting strategy for QCML dataset to have multiple conformers of one graph
+    only in one set.
+    Using percentage splits is recommanded. 
+    Args:
+        external_metadata: path to the external metadata file
+        drop_outliers: bool to drop outliers from the dataset
+    """
+
+    def __init__(self,external_metadata_path:str,drop_outliers:bool = False):
+        self.external_metadata_path = external_metadata_path
+        self.drop_outliers = drop_outliers
+    
+    def drop_is_outlier(self,idxs,outlier_idx):
+        # function to drop outlier indices from the dataset if requested
+        return idxs[~np.isin(idxs, outlier_idx)]
+
+    def extract_indices(self,partition, group_ids):
+        # function to extract db indices from smiles pointer
+        # back to str to access dict keys
+        idx = [str(n) for n in partition]
+        final_idx = ([group_ids[n] for n in idx])
+        # concatenate all indices
+        final_idx = np.concatenate(final_idx)
+        return final_idx
+
+    def split(self,dataset,*split_sizes):
+
+        external_metadata = np.load(self.external_metadata_path,allow_pickle=True) 
+        # structure is key is pointer to smiles
+        # the values are the db indices corresponding to the smiles 
+        group_ids = external_metadata["group_ids"].item()
+        unique_smiles = list(group_ids.keys())
+        # dict needed str as keys therefore back to int
+        unique_smiles = [int(n) for n in unique_smiles]
+        # number of dsize is number of unique smiles pointer
+        dsize = len(unique_smiles)
+        # partition the smiles pointer into requested sizes
+        partition = random_split(len(unique_smiles),*split_sizes)
+        # make indices for the database
+        train_idx, val_idx, test_idx = [self.extract_indices(partition[i], group_ids) for i in range(3)]
+        print("Extracting indices done")
+
+        if self.drop_outliers:
+            print("Dropping outliers")
+            is_outlier = sp.csr_matrix(
+                (external_metadata["is_outlier_data"], 
+                external_metadata["is_outlier_indices"], 
+                external_metadata["is_outlier_indptr"]),
+                shape=external_metadata["is_outlier_shape"]).toarray()
+            outlier_idx = np.where(is_outlier[0,:] == True)[0]
+            clean_train_idx, clean_val_idx, clean_test_idx = [
+                self.drop_is_outlier(idx, outlier_idx) for idx in (train_idx, val_idx, test_idx)]
+            partition_sizes_idx = [clean_train_idx.tolist(), clean_val_idx.tolist(), clean_test_idx.tolist()]
+
+        else:
+            partition_sizes_idx = [train_idx.tolist(), val_idx.tolist(), test_idx.tolist()]
+        
+        return partition_sizes_idx
+
 class AtomTypeSplit(SplittingStrategy):
 
     """
@@ -113,6 +175,7 @@ class AtomTypeSplit(SplittingStrategy):
     def __init__(
             self,
             atomtypes: List[int], 
+            external_metadata:str,
             num_keep: Union[int,float] = None):
         """
         Args:
@@ -127,14 +190,15 @@ class AtomTypeSplit(SplittingStrategy):
     
     def split(self, dataset, *split_sizes):
 
+        external_metadata = np.load(external_metadata, allow_pickle=True)
         # binary array of NxZ, where N is the number of molecules and Z is the number of atom types
         # 1 means the atom type is present in the molecule and 0 means it is not
         # the atom array count can be calculated with estimate_atomrefs code
         atom_type_count = sp.csr_matrix(
-                    (dataset.conn.metadata["atom_type_count_data"], 
-                     dataset.conn.metadata["atom_type_count_indices"], 
-                     dataset.conn.metadata["atom_type_count_indptr"]),
-                     shape=dataset.conn.metadata["atom_type_count_shape"]).toarray()
+            (external_metadata["atom_type_count_data"], 
+             external_metadata["atom_type_count_indices"], 
+             external_metadata["atom_type_count_indptr"]),
+             shape=external_metadata["atom_type_count_shape"]).toarray()
 
         # mask to keep all molecules without requested atomtypes
         keep = (atom_type_count[:,self.atomtypes] == 0).all(axis=1)
