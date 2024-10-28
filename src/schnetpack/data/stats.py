@@ -113,25 +113,14 @@ def estimate_atomrefs(dataloader, is_extensive, z_max=100,external_metadata_path
         # include only those in the subset_idx and convert to tensor
         all_atom_types = torch.tensor(all_atom_types[dataloader.dataset.subset_idx],dtype=torch.float32)
         print("Loaded external metadata")
-
-        # Initial data counter
-        data_counter = 0
-
-        for batch in tqdm(dataloader, "estimating atomrefs"):
-            batch_size = batch[property_names[0]].shape[0]  # Assuming consistent batch size across properties
-            
-            for pname in property_names:
-                property_value = batch[pname]  # Copy to avoid altering original data
-                
-                # Apply extensive property logic to the entire batch at once
-                if not is_extensive[pname]:
-                    property_value *= batch[properties.n_atoms]
-
-                # Store the batch into the correct slice of all_properties[pname]
-                all_properties[pname][data_counter:data_counter + batch_size] = property_value
-            
-            # Update data counter after storing each batch
-            data_counter += batch_size
+        
+        # HARDCODED stuff to remove later
+        for pname in property_names:
+            property_value = external_metadata[pname]
+            # filter to only include those in the subset_idx
+            property_value = torch.tensor(property_value[dataloader.dataset.subset_idx],dtype=torch.float32)
+            # add to all properties
+            all_properties[pname] = property_value
 
     else:
         #atoms_list = []
