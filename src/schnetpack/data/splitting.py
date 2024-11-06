@@ -174,54 +174,102 @@ class AtomTypeSplit(SplittingStrategy):
 
     def __init__(
             self,
-            atomtypes: List[int], 
-            external_metadata:str,
-            num_keep: Union[int,float] = None):
+            base_indices_path: str,
+            draw_indices_path: str, 
+            external_metadata_path:str,
+            drop_outliers:bool = True,
+            num_draw: Union[int,float] = None):
         """
         Args:
             atomtypes: list of atom types to be filtered out.
-            num_keep: percentage of the to be filtered out atomtypes to keep.
+            num_draw: percentage of the to be filtered out atomtypes to keep.
                         For now the percentage is applied to all atomtypes.
                         Values below 1 are interpreted as percentage, values above as absolute number.
                         Conversion is done automatically.
         """
-        self.atomtypes = atomtypes
-        self.num_keep = num_keep 
+        self.num_draw = num_draw
+        self.drop_outliers = drop_outliers
+        self.base_indices_path = base_indices_path
+        self.draw_indices_path = draw_indices_path
+        self.external_metadata_path = external_metadata_path
+
+    def drop_is_outlier(self,idxs,outlier_idx):
+        # function to drop outlier indices from the dataset if requested
+        return idxs[~np.isin(idxs, outlier_idx)]
+
+    def extract_indices(self,partition, group_ids):
+        # function to extract db indices from smiles pointer
+        # back to str to access dict keys
+        idx = [str(n) for n in partition]
+        final_idx = ([group_ids[n] for n in idx])
+        # concatenate all indices
+        final_idx = np.concatenate(final_idx)
+        return final_idx
     
     def split(self, dataset, *split_sizes):
 
-        external_metadata = np.load(external_metadata, allow_pickle=True)
-        # binary array of NxZ, where N is the number of molecules and Z is the number of atom types
-        # 1 means the atom type is present in the molecule and 0 means it is not
-        # the atom array count can be calculated with estimate_atomrefs code
-        atom_type_count = sp.csr_matrix(
-            (external_metadata["atom_type_count_data"], 
-             external_metadata["atom_type_count_indices"], 
-             external_metadata["atom_type_count_indptr"]),
-             shape=external_metadata["atom_type_count_shape"]).toarray()
+        # external metadata storing atom type count, graph to conformer map and flat conformere to graph map
+        external_metadata = np.load(self.external_metadata_path,allow_pickle=True) 
+        group_ids = external_metadata["group_ids"].item()
+        conformere_to_graph = external_metadata["flat_conformere_to_graph_map.npy"]
 
-        # mask to keep all molecules without requested atomtypes
-        keep = (atom_type_count[:,self.atomtypes] == 0).all(axis=1)
-        indices = np.where(keep)[0]
-        # mask to exclude all molecules with requested atomtypes
-        exclude = (~keep)
-        exclude_indices = np.where(exclude)[0]
-        # random indices of exclude to choose from
-        random_iter_indices = np.random.permutation(len(exclude_indices)).tolist()
+        # load the indices of the database and draw indices
+        base_indices = np.load(self.base_indices_path,allow_pickle=True)
+        draw_indices = np.load(self.draw_indices_path,allow_pickle=True)
 
-        # adding requested percentage or absolute value of exclude to keep
-        # if num keep for exclude requested, cumulative keeping is done
-        # e.g first run 3% num keep and second run 5% num keep
-        # the 3% of first run are included in the 5% of the second run
-        if self.num_keep:
-            if self.num_keep < 1:
-                num_keep = int(math.floor(self.num_keep * exclude_indices.shape[0]))
-            else:
-                num_keep = self.num_keep
-            indices = np.concatenate([indices,exclude_indices[random_iter_indices[:num_keep]]])
+        # get unique graphs corresponding to base indices and create train test split from those
+        unique_smiles = np.unique(conformere_to_graph[base_indices][:,1])
+        # number of dsize is number of unique smiles pointer
+        dsize = len(unique_smiles)
 
-        # split the dataset
-        partition_sizes_idx = self.random_split(np.array(indices), *split_sizes)
+        partition = random_split(len(unique_smiles),*split_sizes)
+        # make indices for the database
+        train_idx, val_idx, test_idx = [self.extract_indices(partition[i], group_ids) for i in range(3)]
+        print("Extracting indices done")
+
+        if self.drop_outliers:
+            print("Dropping outliers")
+            is_outlier = sp.csr_matrix(
+                (external_metadata["is_outlier_data"], 
+                external_metadata["is_outlier_indices"], 
+                external_metadata["is_outlier_indptr"]),
+                shape=external_metadata["is_outlier_shape"]).toarray()
+            outlier_idx = np.where(is_outlier[0,:] == True)[0]
+            clean_train_idx, clean_val_idx, clean_test_idx = [
+                self.drop_is_outlier(idx, outlier_idx) for idx in (train_idx, val_idx, test_idx)]
+            partition_sizes_idx = [clean_train_idx.tolist(), clean_val_idx.tolist(), clean_test_idx.tolist()]
+
+        else:
+            partition_sizes_idx = [train_idx.tolist(), val_idx.tolist(), test_idx.tolist()]
+
+        # get unique graphs corresponding to draw indices and place request num_draw to train idx, putting only one conformere per graph
+        draw_unique_graphs = np.unique(conformere_to_graph[draw_indices][:,1])
+        # permutate them, they have no specific order from the start, but better to be sure
+        np.random.shuffle(draw_unique_graphs)
+        # take specified amount (either percentage or absolute number) of unique graphs
+        if self.num_draw < 1:
+                num_keep = int(math.floor(self.num_draw * draw_unique_graphs.shape[0]))
+        else:
+                num_keep = self.num_draw
+
+        drawn = [group_ids[str(n)][0] for n in draw_unique_graphs[:num_keep]]
+
+        partition_sizes_idx[0].extend(drawn)
+
+        # # debugging only start
+        # debug_indices = np.load("/home/elron/phd/projects/google/qmml/experiments/16/split_files/debug_indices.npy")
+        # set_C = set(debug_indices[:,1].tolist())
+        # set_A, set_B, set_D = [set(partition_sizes_idx[i]) for i in (0,1,2)]
+        # set_A_new = set_A & set_C
+        # set_B_new = set_B & set_C
+        # set_D_new = set_D & set_C
+        # result_dict = {row[1]: row[0] for row in debug_indices}
+        # train_idx_new = [result_dict[n].item() for n in set_A_new]
+        # val_idx_new = [result_dict[n].item() for n in set_B_new]
+        # test_idx_new = [0]
+        # partition_sizes_idx = [train_idx_new, val_idx_new, test_idx_new]
+        # # debugging only end
+
         return partition_sizes_idx
 
     def random_split(self,indices, *split_sizes: Union[int, float]) -> List[torch.tensor]:
