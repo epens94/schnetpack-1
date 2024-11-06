@@ -230,8 +230,8 @@ class rMD17(AtomsDataModule):
                 structure.cell: ats.cell,
                 structure.pbc: ats.pbc,
                 # ADDED BECAUSE OF QCML dataset
-                'total_charge': np.array([0]),
-                'spin_multiplicity': np.array([1])
+                "total_charge": np.array([0]),
+                "spin_multiplicity": np.array([1]),
             }
             property_list.append(properties)
 

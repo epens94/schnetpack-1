@@ -76,7 +76,7 @@ class RemoveOffsets(Transform):
         atomrefs: torch.Tensor = None,
         property_mean: torch.Tensor = None,
         estimate_atomref: bool = False,
-        external_metadata_path: Optional[str] = None
+        external_metadata_path: Optional[str] = None,
     ):
         """
         Args:
@@ -125,8 +125,9 @@ class RemoveOffsets(Transform):
         if self.remove_atomrefs and not self._atomrefs_initialized:
             if self.estimate_atomref:
                 atrefs = _datamodule.get_atomrefs(
-                    property=self._property, is_extensive=self.is_extensive, 
-                    external_metadata_path=self.external_metadata_path
+                    property=self._property,
+                    is_extensive=self.is_extensive,
+                    external_metadata_path=self.external_metadata_path,
                 )
             else:
                 atrefs = _datamodule.train_dataset.atomrefs
@@ -244,7 +245,7 @@ class AddOffsets(Transform):
         atomrefs: torch.Tensor = None,
         property_mean: torch.Tensor = None,
         estimate_atomref: bool = False,
-        external_metadata_path: Optional[str] = None
+        external_metadata_path: Optional[str] = None,
     ):
         """
         Args:
@@ -289,8 +290,9 @@ class AddOffsets(Transform):
         if self.add_atomrefs and not self._atomrefs_initialized:
             if self.estimate_atomref:
                 atrefs = _datamodule.get_atomrefs(
-                    property=self._property, is_extensive=self.is_extensive,
-                    external_metadata_path=self.external_metadata_path
+                    property=self._property,
+                    is_extensive=self.is_extensive,
+                    external_metadata_path=self.external_metadata_path,
                 )
             else:
                 atrefs = _datamodule.train_dataset.atomrefs

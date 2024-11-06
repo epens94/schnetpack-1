@@ -8,6 +8,7 @@ import schnetpack.properties as properties
 import schnetpack.nn as snn
 
 from copy import deepcopy
+
 __all__ = ["PaiNN", "PaiNNInteraction", "PaiNNMixing"]
 
 
@@ -223,7 +224,7 @@ class PaiNN(nn.Module):
         idx_i = inputs[properties.idx_i]
         idx_j = inputs[properties.idx_j]
         n_atoms = atomic_numbers.shape[0]
-        
+
         # compute atom and pair features
         d_ij = torch.norm(r_ij, dim=1, keepdim=True)
         dir_ij = r_ij / d_ij
@@ -239,7 +240,7 @@ class PaiNN(nn.Module):
         # compute initial embeddings
         q = self.embedding(atomic_numbers)
         # only tmp added for writing out initial embedding
-        inputs["initial_nuclear_embedding"] = q
+        # inputs["initial_nuclear_embedding"] = q
         for embedding in self.electronic_embeddings:
             q = q + embedding(q, inputs)
         q = q.unsqueeze(1)
@@ -251,7 +252,7 @@ class PaiNN(nn.Module):
             q, mu = interaction(q, mu, filter_list[i], dir_ij, idx_i, idx_j, n_atoms)
             q, mu = mixing(q, mu)
             # tmp added to save all message passing outputs
-            #inputs[f"scalar representation MP_{i+1}"] = deepcopy(q.squeeze(1))
+            # inputs[f"scalar representation MP_{i+1}"] = deepcopy(q.squeeze(1))
         q = q.squeeze(1)
 
         # collect results

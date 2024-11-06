@@ -72,7 +72,6 @@ class SchNetInteraction(nn.Module):
         return x
 
 
-
 class SchNet(nn.Module):
     """SchNet architecture for learning representations of atomistic systems
 
@@ -159,7 +158,6 @@ class SchNet(nn.Module):
         d_ij = torch.norm(r_ij, dim=1)
         f_ij = self.radial_basis(d_ij)
         rcut_ij = self.cutoff_fn(d_ij)
-
 
         # compute initial embeddings
         x = self.embedding(atomic_numbers)

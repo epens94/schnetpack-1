@@ -80,7 +80,7 @@ def calculate_stats(
     return stats
 
 
-def estimate_atomrefs(dataloader, is_extensive, z_max=100,external_metadata_path=None):
+def estimate_atomrefs(dataloader, is_extensive, z_max=100, external_metadata_path=None):
     """
     Uses linear regression to estimate the elementwise biases (atomrefs).
 
@@ -94,8 +94,8 @@ def estimate_atomrefs(dataloader, is_extensive, z_max=100,external_metadata_path
         Elementwise bias estimates over all samples
 
     """
-    #from ase.visualize import view
-    #from ase import Atoms
+    # from ase.visualize import view
+    # from ase import Atoms
     property_names = list(is_extensive.keys())
     n_data = len(dataloader.dataset)
     all_properties = {pname: torch.zeros(n_data) for pname in property_names}
@@ -104,26 +104,35 @@ def estimate_atomrefs(dataloader, is_extensive, z_max=100,external_metadata_path
 
     if external_metadata_path is not None:
         # load external metadata
-        external_metadata = np.load(external_metadata_path,allow_pickle=True)
-        all_atom_types = torch.tensor(sp.csr_matrix(
-            (external_metadata["atom_type_count_data"], 
-             external_metadata["atom_type_count_indices"], 
-             external_metadata["atom_type_count_indptr"]),
-             shape=external_metadata["atom_type_count_shape"]).toarray())
+        external_metadata = np.load(external_metadata_path, allow_pickle=True)
+        all_atom_types = torch.tensor(
+            sp.csr_matrix(
+                (
+                    external_metadata["atom_type_count_data"],
+                    external_metadata["atom_type_count_indices"],
+                    external_metadata["atom_type_count_indptr"],
+                ),
+                shape=external_metadata["atom_type_count_shape"],
+            ).toarray()
+        )
         # include only those in the subset_idx and convert to tensor
-        all_atom_types = torch.tensor(all_atom_types[dataloader.dataset.subset_idx],dtype=torch.float32)
+        all_atom_types = torch.tensor(
+            all_atom_types[dataloader.dataset.subset_idx], dtype=torch.float32
+        )
         print("Loaded external metadata")
-        
+
         # HARDCODED stuff to remove later
         for pname in property_names:
             property_value = external_metadata[pname]
             # filter to only include those in the subset_idx
-            property_value = torch.tensor(property_value[dataloader.dataset.subset_idx],dtype=torch.float32)
+            property_value = torch.tensor(
+                property_value[dataloader.dataset.subset_idx], dtype=torch.float32
+            )
             # add to all properties
             all_properties[pname] = property_value
 
     else:
-        #atoms_list = []
+        # atoms_list = []
         # loop over all batches
         for batch in tqdm(dataloader, "estimating atomrefs"):
             # load data
@@ -134,10 +143,12 @@ def estimate_atomrefs(dataloader, is_extensive, z_max=100,external_metadata_path
             unique_ids = torch.unique(idx_m)
             for i in unique_ids:
                 atomic_numbers_i = atomic_numbers[idx_m == i]
-        #       pos_i = positions[idx_m == i]
-        #       atm = Atoms(numbers=atomic_numbers_i, positions=pos_i)
-        #       atoms_list.append(atm)
-                atom_types, atom_counts = torch.unique(atomic_numbers_i, return_counts=True)
+                #       pos_i = positions[idx_m == i]
+                #       atm = Atoms(numbers=atomic_numbers_i, positions=pos_i)
+                #       atoms_list.append(atm)
+                atom_types, atom_counts = torch.unique(
+                    atomic_numbers_i, return_counts=True
+                )
                 # save atom counts and properties
                 for atom_type, atom_count in zip(atom_types, atom_counts):
                     all_atom_types[data_counter, atom_type] = atom_count
@@ -147,7 +158,6 @@ def estimate_atomrefs(dataloader, is_extensive, z_max=100,external_metadata_path
                         property_value *= batch[properties.n_atoms][i]
                     all_properties[pname][data_counter] = property_value
                 data_counter += 1
-
 
     # perform linear regression to get the elementwise energy contributions
     existing_atom_types = torch.where(all_atom_types.sum(axis=0) != 0)[0]

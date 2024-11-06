@@ -345,7 +345,7 @@ class ASEAtomsData(BaseAtomsData):
         properties[structure.idx] = torch.tensor([idx])
         for pname in load_properties:
             properties[pname] = (
-                    torch.tensor(row.data[pname].copy()) * self.conversions[pname]
+                torch.tensor(row.data[pname].copy()) * self.conversions[pname]
             )
 
         Z = row["numbers"].copy()
