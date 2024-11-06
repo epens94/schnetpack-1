@@ -492,11 +492,24 @@ class AdaptiveLossFunction(torch.nn.Module):
     """
     super(AdaptiveLossFunction, self).__init__()
 
-    self.num_dims = num_dims
-    self.alpha_lo = torch.as_tensor(alpha_lo)
-    self.alpha_hi = torch.as_tensor(alpha_hi)
-    self.scale_lo = torch.as_tensor(scale_lo)
-    self.scale_init = torch.as_tensor(scale_init)
+
+    # register buffers and parameters
+    self.register_buffer("num_dims",torch.tensor(num_dims))
+    self.register_buffer("alpha_lo",torch.tensor(alpha_lo))
+    self.register_buffer("alpha_hi",torch.tensor(alpha_hi))
+    self.register_buffer("scale_lo",torch.tensor(scale_lo))
+    self.register_buffer("scale_init",torch.tensor(scale_init))
+
+    if alpha_init is None:
+      self.register_buffer("alpha_init",torch.tensor((self.alpha_lo + self.alpha_hi) / 2.))
+    else:
+      self.register_buffer("alpha_init",torch.tensor(alpha_init))
+
+    # self.num_dims = num_dims
+    # self.alpha_lo = torch.as_tensor(alpha_lo)
+    # self.alpha_hi = torch.as_tensor(alpha_hi)
+    # self.scale_lo = torch.as_tensor(scale_lo)
+    # self.scale_init = torch.as_tensor(scale_init)
 
     self.distribution = Distribution()
 
@@ -505,8 +518,8 @@ class AdaptiveLossFunction(torch.nn.Module):
       # a constant.
       self.fixed_alpha = alpha_lo.unsqueeze(0).unsqueeze(0).repeat(1, self.num_dims)
       # Assuming alpha_lo is already a torch.Tensor
-
       self.alpha = lambda: self.fixed_alpha
+      #self.alpha = self.fixed_alpha
     else:
       # Otherwise we construct a "latent" alpha variable and define `alpha`
       # As an affine function of a sigmoid on that latent variable, initialized
@@ -518,8 +531,8 @@ class AdaptiveLossFunction(torch.nn.Module):
       latent_alpha_init_1 = latent_alpha_init.clone().unsqueeze(0).unsqueeze(0).repeat(1, self.num_dims)
       self.register_parameter('latent_alpha', torch.nn.Parameter(latent_alpha_init_1,requires_grad=True))
       
-
-      self.alpha = lambda: affine_sigmoid(self.latent_alpha, lo=alpha_lo, hi=alpha_hi)
+      #self.alpha = self.alpha_in_init(self.latent_alpha,alpha_lo,alpha_hi)
+      #self.alpha = lambda: affine_sigmoid(self.latent_alpha, lo=alpha_lo, hi=alpha_hi)
 
     if scale_lo == scale_init:
       # If the difference between the minimum and initial scale is zero, then
@@ -529,13 +542,22 @@ class AdaptiveLossFunction(torch.nn.Module):
       #     scale_init, dtype=self.float_dtype,
       #     device=self.device)[np.newaxis, np.newaxis].repeat(1, self.num_dims)
       self.scale = lambda: self.fixed_scale
+      #self.scale = self.fixed_scale
     else:
       # Otherwise we construct a "latent" scale variable and define `scale`
       # As an affine function of a softplus on that latent variable.
 
       self.register_parameter('latent_scale',torch.nn.Parameter(torch.zeros((1, self.num_dims)),requires_grad=True))
-      self.scale = lambda: affine_softplus(self.latent_scale, lo=scale_lo, ref=scale_init)
+      #self.scale = lambda: affine_softplus(self.latent_scale, lo=scale_lo, ref=scale_init)
+      #self.scale = self.scale_in_init(self.latent_scale, lo=scale_lo, ref=scale_init)
 
+
+  def scale_in_init(self,x,lo,ref):
+    return affine_softplus(x, lo=lo, ref=ref)
+
+  def alpha_in_init(self,logits,alpha_lo,alpha_hi):
+
+    return affine_sigmoid(logits, lo=alpha_lo, hi=alpha_hi)
 
   def lossfun(self, x, **kwargs):
     """Computes the loss on a matrix.
@@ -558,7 +580,12 @@ class AdaptiveLossFunction(torch.nn.Module):
     assert len(x.shape) == 2
     assert x.shape[1] == self.num_dims
     #assert x.dtype == self.float_dtype
-    return self.distribution.nllfun(x, self.alpha(), self.scale(), **kwargs)
+    #return self.distribution.nllfun(x, self.alpha, self.scale, **kwargs)
+    # 
+    _alpha = self.alpha_in_init(self.latent_alpha, alpha_lo = self.alpha_lo, alpha_hi = self.alpha_hi)
+    _scale = self.scale_in_init(self.latent_scale, lo = self.scale_lo, ref = self.scale_init)
+    return self.distribution.nllfun(x, _alpha, _scale, **kwargs)
+    #return self.distribution.nllfun(x, self.alpha(), self.scale(), **kwargs)
   
   def forward(self,input,pred):
     if pred.ndim == 1:
