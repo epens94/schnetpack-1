@@ -197,6 +197,7 @@ class AtomTypeSplit(SplittingStrategy):
         self,
         base_indices_path: str,
         draw_indices_path: str,
+        test_indices_path: str,
         external_metadata_path: str,
         drop_outliers: bool = True,
         num_draw: Union[int, float] = None,
@@ -213,20 +214,29 @@ class AtomTypeSplit(SplittingStrategy):
         self.drop_outliers = drop_outliers
         self.base_indices_path = base_indices_path
         self.draw_indices_path = draw_indices_path
+        self.test_indices_path = test_indices_path
         self.external_metadata_path = external_metadata_path
 
     def drop_is_outlier(self, idxs, outlier_idx):
         # function to drop outlier indices from the dataset if requested
         return idxs[~np.isin(idxs, outlier_idx)]
 
-    def extract_indices(self, partition, group_ids):
+    def extract_indices(self, partition, group_ids,unique_smiles):
         # function to extract db indices from smiles pointer
         # back to str to access dict keys
-        idx = [str(n) for n in partition]
+        idx = [str(unique_smiles[n]) for n in partition]
         final_idx = [group_ids[n] for n in idx]
         # concatenate all indices
         final_idx = np.concatenate(final_idx)
+        np.random.shuffle(final_idx)
         return final_idx
+
+    def extract_unique_smiles(self,conformere_to_graph,indices):
+
+        mask = np.isin(conformere_to_graph[:, 0], indices)
+        matching_indices = np.where(mask)[0]
+        unique_smiles = np.unique(conformere_to_graph[matching_indices][:,1])
+        return unique_smiles
 
     def split(self, dataset, *split_sizes):
 
@@ -240,15 +250,16 @@ class AtomTypeSplit(SplittingStrategy):
         draw_indices = np.load(self.draw_indices_path, allow_pickle=True)
 
         # get unique graphs corresponding to base indices and create train test split from those
-        unique_smiles = np.unique(conformere_to_graph[base_indices][:, 1])
+        unique_smiles = self.extract_unique_smiles(conformere_to_graph,base_indices)
         # number of dsize is number of unique smiles pointer
         dsize = len(unique_smiles)
 
         partition = random_split(len(unique_smiles), *split_sizes)
-        # make indices for the database
-        train_idx, val_idx, test_idx = [
-            self.extract_indices(partition[i], group_ids) for i in range(3)
+        # make indices for the database, but only train and valid because test are read in seperatly
+        train_idx, val_idx = [
+            self.extract_indices(partition[i], group_ids,unique_smiles) for i in range(2)
         ]
+        test_idx = np.load(self.test_indices_path, allow_pickle=True)
         print("Extracting indices done")
 
         if self.drop_outliers:
@@ -280,7 +291,7 @@ class AtomTypeSplit(SplittingStrategy):
             ]
 
         # get unique graphs corresponding to draw indices and place request num_draw to train idx, putting only one conformere per graph
-        draw_unique_graphs = np.unique(conformere_to_graph[draw_indices][:, 1])
+        draw_unique_graphs = self.extract_unique_smiles(conformere_to_graph,draw_indices)
         # permutate them, they have no specific order from the start, but better to be sure
         np.random.shuffle(draw_unique_graphs)
         # take specified amount (either percentage or absolute number) of unique graphs
@@ -290,22 +301,11 @@ class AtomTypeSplit(SplittingStrategy):
             num_keep = self.num_draw
 
         drawn = [group_ids[str(n)][0] for n in draw_unique_graphs[:num_keep]]
-
+        # add the drawn indices to the train indices only
         partition_sizes_idx[0].extend(drawn)
 
-        # # debugging only start
-        # debug_indices = np.load("/home/elron/phd/projects/google/qmml/experiments/16/split_files/debug_indices.npy")
-        # set_C = set(debug_indices[:,1].tolist())
-        # set_A, set_B, set_D = [set(partition_sizes_idx[i]) for i in (0,1,2)]
-        # set_A_new = set_A & set_C
-        # set_B_new = set_B & set_C
-        # set_D_new = set_D & set_C
-        # result_dict = {row[1]: row[0] for row in debug_indices}
-        # train_idx_new = [result_dict[n].item() for n in set_A_new]
-        # val_idx_new = [result_dict[n].item() for n in set_B_new]
-        # test_idx_new = [0]
-        # partition_sizes_idx = [train_idx_new, val_idx_new, test_idx_new]
-        # # debugging only end
+        # make sure everything is native python int for database indexing
+        partition_sizes_idx = [list(map(int,idx)) for idx in partition_sizes_idx]
 
         return partition_sizes_idx
 
