@@ -128,6 +128,7 @@ class QCMLSplit(SplittingStrategy):
         final_idx = [group_ids[n] for n in idx]
         # concatenate all indices
         final_idx = np.concatenate(final_idx)
+        np.random.shuffle(final_idx)
         return final_idx
 
     def split(self, dataset, *split_sizes):
