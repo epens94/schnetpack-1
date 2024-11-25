@@ -19,7 +19,7 @@ import h5py
 import pandas as pd
 from tqdm import tqdm
 
-__all__ = ["ModelCheckpoint", "PredictionWriter", "ExponentialMovingAverage"]
+__all__ = ["ModelCheckpoint", "PredictionWriter", "ExponentialMovingAverage","SeenIndicesTracker"]
 
 
 
@@ -545,3 +545,38 @@ class ExponentialMovingAverage(Callback):
 
     def state_dict(self):
         return {"ema": self.ema.state_dict()}
+
+
+class SeenIndicesTracker(Callback):
+    def __init__(self, tracker_path,debug=False):
+        self.tracker_path = tracker_path
+        self.stop_criterion = 1
+        self.target_epoch = None
+        self.train_steps_completed = 0
+        self.values = {}
+        self.debug = debug
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        """Reset seen indices at the start of a new epoch."""
+        trainer.datamodule.seen_indices = set()
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        """Update seen indices at the start of each batch."""
+        batch_indices = batch["_idx"].cpu().numpy()
+
+        # together with datamodule, keep track of seen indices in debug mode
+        #key = f"{trainer.current_epoch}_{trainer.global_step+1}"
+        #trainer.datamodule.debug_indices[key] = batch_indices
+
+        trainer.datamodule.seen_indices.update(batch_indices)
+
+        #if self.debug:
+        #    if trainer.global_step > 37:
+        #        trainer.should_stop = True
+        self.train_steps_completed += 1
+    
+    def on_train_epoch_end(self,trainer,pl_module):
+
+        if trainer.datamodule.finished_last_epoch and self.train_steps_completed > 0:
+            #print(f"Ending training {trainer.datamodule.finished_last_epoch} {self.train_steps_completed}")
+            trainer.should_stop = True

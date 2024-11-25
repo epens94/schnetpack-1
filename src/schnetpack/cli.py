@@ -25,7 +25,7 @@ from schnetpack.utils import load_model
 log = logging.getLogger(__name__)
 
 
-OmegaConf.register_new_resolver("uuid", lambda x: str(uuid.uuid1()))
+OmegaConf.register_new_resolver("uuid", lambda x: str(uuid.uuid1()),use_cache=True)
 OmegaConf.register_new_resolver("tmpdir", tempfile.mkdtemp, use_cache=True)
 
 header = """
@@ -172,7 +172,84 @@ def train(config: DictConfig):
 
     # Train the model
     log.info("Starting training.")
-    trainer.fit(model=task, datamodule=datamodule, ckpt_path=config.run.ckpt_path)
+    if config.run.ckpt_path is not None:
+
+        # manually overwrite the batch progress to ensure that all remaining indices are used
+        checkpoint = torch.load(config.run.ckpt_path,map_location="cpu")
+        checkpoint["loops"]["fit_loop"]["epoch_loop.batch_progress"]["current"]["completed"] = 0
+        checkpoint["loops"]["fit_loop"]["epoch_loop.batch_progress"]["current"]["ready"] = 0
+
+        torch.save(checkpoint,config.run.ckpt_path)
+
+        trainer.fit(model=task, datamodule=datamodule,ckpt_path=config.run.ckpt_path)
+        #exit()
+        log.info("Re-Instantiating datamodule after finishing last ran epoch")
+        ckpt_path = os.path.join(config.run.path,config.run.id,"checkpoints/ckpt_at_and_of_current_epoch.ckpt")
+
+        # Re Init everything
+        # Init Lightning datamodule
+        log.info(f"RE-Instantiating datamodule <{config.data._target_}>")
+        datamodule: LightningDataModule = hydra.utils.instantiate(
+            config.data,
+            train_sampler_cls=(
+                str2class(config.data.train_sampler_cls)
+                if config.data.train_sampler_cls
+                else None
+            )
+        )
+
+        # Init model
+        log.info(f"RE-Instantiating model <{config.model._target_}>")
+        model = hydra.utils.instantiate(config.model)
+
+        # Init LightningModule
+        log.info(f"RE-Instantiating task <{config.task._target_}>")
+        scheduler_cls = (
+            str2class(config.task.scheduler_cls) if config.task.scheduler_cls else None
+        )
+
+        task: spk.AtomisticTask = hydra.utils.instantiate(
+            config.task,
+            model=model,
+            optimizer_cls=str2class(config.task.optimizer_cls),
+            scheduler_cls=scheduler_cls,
+        )
+
+        # Init Lightning callbacks
+        callbacks: List[Callback] = []
+        if "callbacks" in config:
+            for _, cb_conf in config["callbacks"].items():
+                if "_target_" in cb_conf:
+                    log.info(f"RE-Instantiating callback <{cb_conf._target_}>")
+                    callbacks.append(hydra.utils.instantiate(cb_conf))
+
+        # Init Lightning loggers
+        logger: List[Logger] = []
+
+        if "logger" in config:
+            for _, lg_conf in config["logger"].items():
+                if "_target_" in lg_conf:
+                    log.info(f"RE-Instantiating logger <{lg_conf._target_}>")
+                    l = hydra.utils.instantiate(lg_conf)
+
+                    logger.append(l)
+
+        # Init Lightning trainer
+        log.info(f"RE-Instantiating trainer <{config.trainer._target_}>")
+        trainer: Trainer = hydra.utils.instantiate(
+            config.trainer,
+            callbacks=callbacks,
+            logger=logger,
+            default_root_dir=os.path.join(config.run.id),
+            _convert_="partial",
+            #reload_dataloaders_every_n_epochs=1
+        )
+        
+        trainer.fit(model=task, datamodule=datamodule, ckpt_path=ckpt_path)
+        print("Done")
+
+    else:
+        trainer.fit(model=task, datamodule=datamodule, ckpt_path=None)
 
     # Evaluate model on test set after training
     log.info("Starting testing.")

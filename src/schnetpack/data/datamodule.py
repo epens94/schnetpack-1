@@ -8,6 +8,9 @@ import fasteners
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import BatchSampler
+from torch.utils.data import SubsetRandomSampler, SequentialSampler
+import math
+import random
 
 from schnetpack.data import (
     AtomsDataFormat,
@@ -63,6 +66,7 @@ class AtomsDataModule(pl.LightningDataModule):
         splitting: Optional[SplittingStrategy] = None,
         pin_memory: Optional[bool] = False,
         external_metadata_path: Optional[str] = None,
+        #debug_path: Optional[str] = None    
     ):
         """
         Args:
@@ -149,6 +153,15 @@ class AtomsDataModule(pl.LightningDataModule):
 
         self.train_sampler_cls = train_sampler_cls
         self.train_sampler_args = train_sampler_args
+
+
+        self.remaining_indices = []
+        self.seen_indices = set()
+        self.finished_last_epoch = False
+        self.remaining_indices_processed = 0
+        #self.debug_indices = {}
+        #random_4_digit = random.randint(1000, 9999)
+        #self.debug_path = f"{debug_path}_{random_4_digit}"
 
     @property
     def train_transforms(self):
@@ -393,7 +406,32 @@ class AtomsDataModule(pl.LightningDataModule):
         return self._test_dataset
 
     def train_dataloader(self) -> AtomsLoader:
-        if self._train_dataloader is None:
+
+
+        if not self.finished_last_epoch and len(self.remaining_indices) > 0:
+            
+            # assign remaining indices as subset to finish epoch that broke
+            np.random.shuffle(self.remaining_indices)
+            self._train_dataset.subset_idx = self.remaining_indices
+
+            train_batch_sampler = None
+            self._train_dataloader = AtomsLoader(
+                self._train_dataset,
+                batch_size= self.batch_size if train_batch_sampler is None else 1,
+                shuffle=True if train_batch_sampler is None else False,
+                batch_sampler=train_batch_sampler,
+                num_workers=self.num_workers,
+                pin_memory=self._pin_memory,
+            )
+            # because execution only after state dict loaded, but 
+            # the loader needs to be reinitialized when the remaining indices are done
+            self.remaining_indices_processed = 2
+            self.finished_last_epoch = True
+
+            
+        # during setup for atomref this is the first call and the dataloader is not yet
+        # initialized, but the state dict is also not loaded   
+        if self._train_dataloader is None and self.remaining_indices_processed == 0:
 
             train_batch_sampler = self._setup_sampler(
                 sampler_cls=self.train_sampler_cls,
@@ -409,6 +447,9 @@ class AtomsDataModule(pl.LightningDataModule):
                 num_workers=self.num_workers,
                 pin_memory=self._pin_memory,
             )
+            # set the tag, now to check if 
+            self.remaining_indices_processed = 1
+
         return self._train_dataloader
 
     def val_dataloader(self) -> AtomsLoader:
@@ -430,3 +471,28 @@ class AtomsDataModule(pl.LightningDataModule):
                 pin_memory=self._pin_memory,
             )
         return self._test_dataloader
+
+    def state_dict(self):
+        """
+        Save the state of already iterated indices and remaining indices.
+        """
+        if self.finished_last_epoch:
+            remaining_indices = []
+        else:
+            remaining_indices  = list(set(self.train_idx) - self.seen_indices)
+        #if self.debug_path is not None:
+        #    np.savez(self.debug_path, np.array(self.debug_indices))
+
+        return {
+            "seen_indices": list(self.seen_indices),
+            "remaining_indices": remaining_indices
+        }
+    
+    def load_state_dict(self, state_dict):
+        """
+        Load the state of already iterated indices and remaining indices.
+        """
+        
+        self.seen_indices = set(state_dict["seen_indices"])
+        self.remaining_indices = state_dict["remaining_indices"]
+    
