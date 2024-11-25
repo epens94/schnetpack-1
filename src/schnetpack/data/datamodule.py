@@ -159,6 +159,7 @@ class AtomsDataModule(pl.LightningDataModule):
         self.seen_indices = set()
         self.finished_last_epoch = False
         self.remaining_indices_processed = 0
+        self.take_away = None
         #self.debug_indices = {}
         #random_4_digit = random.randint(1000, 9999)
         #self.debug_path = f"{debug_path}_{random_4_digit}"
@@ -211,6 +212,7 @@ class AtomsDataModule(pl.LightningDataModule):
             self._train_dataset = self.dataset.subset(self.train_idx)
             self._val_dataset = self.dataset.subset(self.val_idx)
             self._test_dataset = self.dataset.subset(self.test_idx)
+            self.take_away = set(self.train_idx)
             self._setup_transforms()
 
     def _copy_to_workdir(self):
@@ -411,8 +413,10 @@ class AtomsDataModule(pl.LightningDataModule):
         if not self.finished_last_epoch and len(self.remaining_indices) > 0:
             
             # assign remaining indices as subset to finish epoch that broke
-            np.random.shuffle(self.remaining_indices)
-            self._train_dataset.subset_idx = self.remaining_indices
+            
+            indices = list(self.remaining_indices)
+            np.random.shuffle(indices)
+            self._train_dataset.subset_idx = indices
 
             train_batch_sampler = None
             self._train_dataloader = AtomsLoader(
@@ -477,15 +481,13 @@ class AtomsDataModule(pl.LightningDataModule):
         Save the state of already iterated indices and remaining indices.
         """
         if self.finished_last_epoch:
-            remaining_indices = []
-        else:
-            remaining_indices  = list(set(self.train_idx) - self.seen_indices)
+            self.remaining_indices = set()
+
         #if self.debug_path is not None:
         #    np.savez(self.debug_path, np.array(self.debug_indices))
 
         return {
-            "seen_indices": list(self.seen_indices),
-            "remaining_indices": remaining_indices
+            "remaining_indices": self.remaining_indices
         }
     
     def load_state_dict(self, state_dict):
@@ -493,6 +495,5 @@ class AtomsDataModule(pl.LightningDataModule):
         Load the state of already iterated indices and remaining indices.
         """
         
-        self.seen_indices = set(state_dict["seen_indices"])
         self.remaining_indices = state_dict["remaining_indices"]
     

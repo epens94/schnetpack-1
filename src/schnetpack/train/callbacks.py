@@ -1,4 +1,4 @@
-from copy import copy
+from copy import copy, deepcopy
 from typing import Dict
 import numpy as np
 
@@ -18,6 +18,7 @@ from collections import defaultdict
 import h5py
 import pandas as pd
 from tqdm import tqdm
+
 
 __all__ = ["ModelCheckpoint", "PredictionWriter", "ExponentialMovingAverage","SeenIndicesTracker"]
 
@@ -558,17 +559,17 @@ class SeenIndicesTracker(Callback):
 
     def on_train_epoch_start(self, trainer, pl_module):
         """Reset seen indices at the start of a new epoch."""
-        trainer.datamodule.seen_indices = set()
+        trainer.datamodule.remaining_indices = deepcopy(trainer.datamodule.take_away)
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         """Update seen indices at the start of each batch."""
-        batch_indices = batch["_idx"].cpu().numpy()
+        batch_indices = set(batch["_idx"].tolist()) 
 
         # together with datamodule, keep track of seen indices in debug mode
         #key = f"{trainer.current_epoch}_{trainer.global_step+1}"
         #trainer.datamodule.debug_indices[key] = batch_indices
 
-        trainer.datamodule.seen_indices.update(batch_indices)
+        trainer.datamodule.remaining_indices -= batch_indices
 
         #if self.debug:
         #    if trainer.global_step > 37:
