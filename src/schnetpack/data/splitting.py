@@ -121,34 +121,19 @@ class QCMLSplit(SplittingStrategy):
         # function to drop outlier indices from the dataset if requested
         return idxs[~np.isin(idxs, outlier_idx)]
 
-    def extract_indices(self, partition, group_ids):
+    def extract_indices(self, partition, group_ids,unique_smiles):
         # function to extract db indices from smiles pointer
-        # back to str to access dict keys
-        idx = [str(n) for n in partition]
-        final_idx = [group_ids[n] for n in idx]
-        # concatenate all indices
-        final_idx = np.concatenate(final_idx)
+        smiles_idx = [unique_smiles[n] for n in partition]
+        final_idx = group_ids[np.isin(group_ids[:,1],smiles_idx)][:,0]
         np.random.shuffle(final_idx)
         return final_idx
 
     def split(self, dataset, *split_sizes):
 
+
         external_metadata = np.load(self.external_metadata_path, allow_pickle=True)
-        # structure is key is pointer to smiles
         # the values are the db indices corresponding to the smiles
-        group_ids = external_metadata["group_ids"].item()
-        unique_smiles = list(group_ids.keys())
-        # dict needed str as keys therefore back to int
-        unique_smiles = [int(n) for n in unique_smiles]
-        # number of dsize is number of unique smiles pointer
-        dsize = len(unique_smiles)
-        # partition the smiles pointer into requested sizes
-        partition = random_split(len(unique_smiles), *split_sizes)
-        # make indices for the database
-        train_idx, val_idx, test_idx = [
-            self.extract_indices(partition[i], group_ids) for i in range(3)
-        ]
-        print("Extracting indices done")
+        group_ids = external_metadata["flat_conformere_to_graph_map"]
 
         if self.drop_outliers:
             print("Dropping outliers")
@@ -160,19 +145,23 @@ class QCMLSplit(SplittingStrategy):
                 ),
                 shape=external_metadata["is_outlier_shape"],
             ).toarray()
-            outlier_idx = np.where(is_outlier[0, :] == True)[0]
-            clean_train_idx, clean_val_idx, clean_test_idx = [
-                self.drop_is_outlier(idx, outlier_idx)
-                for idx in (train_idx, val_idx, test_idx)
-            ]
-            partition_sizes_idx = [
-                clean_train_idx.tolist(),
-                clean_val_idx.tolist(),
-                clean_test_idx.tolist(),
-            ]
+            # via boolean indexing, all false values are kept
+            group_ids = group_ids[~is_outlier.squeeze()]
 
-        else:
-            partition_sizes_idx = [
+
+        unique_smiles = np.unique(group_ids[:,1])
+        # number of dsize is number of unique smiles pointer
+        dsize = len(unique_smiles)
+        # partition the smiles pointer into requested sizes
+        partition = random_split(len(unique_smiles), *split_sizes)
+        # make indices for the database
+        train_idx, val_idx, test_idx = [
+            self.extract_indices(partition[i], group_ids,unique_smiles) for i in range(3)
+        ]
+        print("Extracting indices done")
+
+        
+        partition_sizes_idx = [
                 train_idx.tolist(),
                 val_idx.tolist(),
                 test_idx.tolist(),
@@ -199,7 +188,6 @@ class AtomTypeSplit(SplittingStrategy):
         draw_indices_path: str,
         test_indices_path: str,
         external_metadata_path: str,
-        drop_outliers: bool = True,
         num_draw: Union[int, float] = None,
     ):
         """
@@ -211,7 +199,6 @@ class AtomTypeSplit(SplittingStrategy):
                         Conversion is done automatically.
         """
         self.num_draw = num_draw
-        self.drop_outliers = drop_outliers
         self.base_indices_path = base_indices_path
         self.draw_indices_path = draw_indices_path
         self.test_indices_path = test_indices_path
@@ -223,11 +210,8 @@ class AtomTypeSplit(SplittingStrategy):
 
     def extract_indices(self, partition, group_ids,unique_smiles):
         # function to extract db indices from smiles pointer
-        # back to str to access dict keys
-        idx = [str(unique_smiles[n]) for n in partition]
-        final_idx = [group_ids[n] for n in idx]
-        # concatenate all indices
-        final_idx = np.concatenate(final_idx)
+        smiles_idx = [unique_smiles[n] for n in partition]
+        final_idx = group_ids[np.isin(group_ids[:,1],smiles_idx)][:,0]
         np.random.shuffle(final_idx)
         return final_idx
 
@@ -242,15 +226,14 @@ class AtomTypeSplit(SplittingStrategy):
 
         # external metadata storing atom type count, graph to conformer map and flat conformere to graph map
         external_metadata = np.load(self.external_metadata_path, allow_pickle=True)
-        group_ids = external_metadata["group_ids"].item()
-        conformere_to_graph = external_metadata["flat_conformere_to_graph_map.npy"]
+        group_ids = external_metadata["flat_conformere_to_graph_map"]
 
         # load the indices of the database and draw indices
         base_indices = np.load(self.base_indices_path, allow_pickle=True)
         draw_indices = np.load(self.draw_indices_path, allow_pickle=True)
 
         # get unique graphs corresponding to base indices and create train test split from those
-        unique_smiles = self.extract_unique_smiles(conformere_to_graph,base_indices)
+        unique_smiles = np.unique(group_ids[base_indices][:,1])
         # number of dsize is number of unique smiles pointer
         dsize = len(unique_smiles)
 
@@ -262,36 +245,14 @@ class AtomTypeSplit(SplittingStrategy):
         test_idx = np.load(self.test_indices_path, allow_pickle=True)
         print("Extracting indices done")
 
-        if self.drop_outliers:
-            print("Dropping outliers")
-            is_outlier = sp.csr_matrix(
-                (
-                    external_metadata["is_outlier_data"],
-                    external_metadata["is_outlier_indices"],
-                    external_metadata["is_outlier_indptr"],
-                ),
-                shape=external_metadata["is_outlier_shape"],
-            ).toarray()
-            outlier_idx = np.where(is_outlier[0, :] == True)[0]
-            clean_train_idx, clean_val_idx, clean_test_idx = [
-                self.drop_is_outlier(idx, outlier_idx)
-                for idx in (train_idx, val_idx, test_idx)
-            ]
-            partition_sizes_idx = [
-                clean_train_idx.tolist(),
-                clean_val_idx.tolist(),
-                clean_test_idx.tolist(),
-            ]
-
-        else:
-            partition_sizes_idx = [
-                train_idx.tolist(),
-                val_idx.tolist(),
-                test_idx.tolist(),
+        partition_sizes_idx = [
+            train_idx.tolist(),
+            val_idx.tolist(),
+            test_idx.tolist(),
             ]
 
         # get unique graphs corresponding to draw indices and place request num_draw to train idx, putting only one conformere per graph
-        draw_unique_graphs = self.extract_unique_smiles(conformere_to_graph,draw_indices)
+        draw_unique_graphs = np.unique(group_ids[draw_indices][:,1])
         # permutate them, they have no specific order from the start, but better to be sure
         np.random.shuffle(draw_unique_graphs)
         # take specified amount (either percentage or absolute number) of unique graphs
@@ -300,7 +261,8 @@ class AtomTypeSplit(SplittingStrategy):
         else:
             num_keep = self.num_draw
 
-        drawn = [group_ids[str(n)][0] for n in draw_unique_graphs[:num_keep]]
+        partition = range(num_keep)
+        drawn = self.extract_indices(partition, group_ids,draw_unique_graphs)
         # add the drawn indices to the train indices only
         partition_sizes_idx[0].extend(drawn)
 
