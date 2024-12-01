@@ -55,7 +55,6 @@ def train(config: DictConfig):
 
         # since container will always new initialized
         os.makedirs(DB_FOLDER, exist_ok=True)
-        os.makedirs(CKP_FOLDER, exist_ok=True)
         # download the database
         db_name = os.path.basename(config.data.datapath)
         db_folder = os.path.join(DB_FOLDER, db_name)
