@@ -166,7 +166,7 @@ def train(config: DictConfig):
     seed_everything(seed=config.seed, workers=True)
 
     if config.get("print_config"):
-        print_config(config, resolve=False)
+        print_config(config, resolve=True)
 
     if not os.path.exists(config.run.data_dir):
         os.makedirs(config.run.data_dir)
