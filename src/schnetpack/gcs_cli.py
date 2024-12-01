@@ -79,7 +79,7 @@ def train(config: DictConfig):
             # ckpt_list = [n for n in check_output(command, shell=True, text=True).strip().split("\n") if "epoch" in n]
 
             # which ckptoint to choose
-            ckpt_list = [os.path.join(CKP_FOLDER,f) for f in ckpt_list]
+            ckpt_list = [os.path.join(CKP_FOLDER,f) for f in os.listdir(CKP_FOLDER)]
             tag1,tag2 = ("and_of_epoch","periodic_")
 
             cond = {
