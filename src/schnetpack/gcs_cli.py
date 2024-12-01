@@ -51,7 +51,7 @@ def train(config: DictConfig):
         ## all database downloading stuff
 
         # for my custom restarting from checkpoint from gs cloud, only use the ID
-        DB_FOLDER,CKP_FOLDER,BUCKET_NAME = "/home/data/databases","/home/checkpoints","qcml_transfer_learning"
+        DB_FOLDER,BUCKET_NAME = "/home/data/databases","qcml_transfer_learning"
 
         # since container will always new initialized
         os.makedirs(DB_FOLDER, exist_ok=True)
@@ -71,6 +71,10 @@ def train(config: DictConfig):
 
         if config.run.ckpt_path is not None:
             CKP_FOLDER = os.path.join(config.run.path,config.run.id,"checkpoints")
+            print(CKP_FOLDER)
+            print(config.run.id)
+            config.run.id = config.run.ckpt_path
+            print(config.run.id)
             # now we download the checkpoint from the cloud
             command = f'gcloud storage ls gs://{BUCKET_NAME}/experiments/{config.run.ckpt_path}/checkpoints/'
             ckpt_list = [n for n in check_output(command, shell=True, text=True).strip().split("\n") if "epoch" in n]
