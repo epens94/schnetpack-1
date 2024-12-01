@@ -69,15 +69,17 @@ def train(config: DictConfig):
         ## all checkpoint downloading stuff
 
         if config.run.ckpt_path is not None:
-
             config.run.id = config.run.ckpt_path
-            CKP_FOLDER = os.path.join(config.run.path,config.run.id,"checkpoints")
-            log.info(f"CKP FOLDER {CKP_FOLDER}")
-            # now we download the checkpoint from the cloud
-            command = f'gcloud storage ls gs://{BUCKET_NAME}/experiments/{config.run.ckpt_path}/checkpoints/'
-            ckpt_list = [n for n in check_output(command, shell=True, text=True).strip().split("\n") if "epoch" in n]
+            CKP_FOLDER = os.path.join(os.path.abspath('.'),"checkpoints")
+
+            # CKP_FOLDER = os.path.join(config.run.path,config.run.id,"checkpoints")
+            # log.info(f"CKP FOLDER {CKP_FOLDER}")
+            # # now we download the checkpoint from the cloud
+            # command = f'gcloud storage ls gs://{BUCKET_NAME}/experiments/{config.run.ckpt_path}/checkpoints/'
+            # ckpt_list = [n for n in check_output(command, shell=True, text=True).strip().split("\n") if "epoch" in n]
 
             # which ckptoint to choose
+            ckpt_list = [os.path.join(CKP_FOLDER,f) for f in ckpt_list]
             tag1,tag2 = ("and_of_epoch","periodic_")
 
             cond = {
@@ -90,17 +92,19 @@ def train(config: DictConfig):
             ckpt_folder = cond[tag2][1] if cond[tag2][0] >= cond[tag1][0] else cond[tag1][1]
 
             # download the checkpoint
-            resume_ckpt_path = os.path.join(CKP_FOLDER, os.path.basename(ckpt_folder))
-            resume_split_path = os.path.join(CKP_FOLDER,"split.npz")
-            subprocess.check_call(['gcloud','storage','cp','-r',
-                                    ckpt_folder,
-                                    resume_ckpt_path])
+            resume_ckpt_path = ckpt_folder
+            resume_split_path = os.path.join(os.path.abspath('.'),"split.npz")
+            # #resume_ckpt_path = os.path.join(CKP_FOLDER, os.path.basename(ckpt_folder))
+            # resume_split_path = os.path.join(CKP_FOLDER,"split.npz")
+            # subprocess.check_call(['gcloud','storage','cp','-r',
+            #                         ckpt_folder,
+            #                         resume_ckpt_path])
             
-            # download the split file
-            command = f'gs://{BUCKET_NAME}/experiments/{config.run.ckpt_path}/split.npz'
-            subprocess.check_call(['gcloud','storage','cp', '-r',
-                                    command,
-                                    resume_split_path])
+            # # download the split file
+            # command = f'gs://{BUCKET_NAME}/experiments/{config.run.ckpt_path}/split.npz'
+            # subprocess.check_call(['gcloud','storage','cp', '-r',
+            #                         command,
+            #                         resume_split_path])
             # update the config
             config.data.split_file = resume_split_path
             config.run.ckpt_path = resume_ckpt_path
