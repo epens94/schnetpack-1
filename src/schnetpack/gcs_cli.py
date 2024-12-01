@@ -69,11 +69,10 @@ def train(config: DictConfig):
         ## all checkpoint downloading stuff
 
         if config.run.ckpt_path is not None:
-            CKP_FOLDER = os.path.join(config.run.path,config.run.id,"checkpoints")
-            logging.info(f"{CKP_FOLDER}")
-            logging.info(f"{config.run.id}")
+
             config.run.id = config.run.ckpt_path
-            logging.info(f"{config.run.id}")
+            CKP_FOLDER = os.path.join(config.run.path,config.run.id,"checkpoints")
+            log.info(f"CKP FOLDER {CKP_FOLDER}")
             # now we download the checkpoint from the cloud
             command = f'gcloud storage ls gs://{BUCKET_NAME}/experiments/{config.run.ckpt_path}/checkpoints/'
             ckpt_list = [n for n in check_output(command, shell=True, text=True).strip().split("\n") if "epoch" in n]
