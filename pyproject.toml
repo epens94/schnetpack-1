@@ -55,6 +55,7 @@ script-files = [
     "src/scripts/spkpredict",
     "src/scripts/spkmd",
     "src/scripts/spkdeploy",
+    "src/scripts/spktrain_gcs",
 ]
 
 # Ensure package data such as resources are included

@@ -345,8 +345,3 @@ def train(config: DictConfig):
         import wandb
         wandb.finish()
 
-if __name__ == "__main__":
-    BUCKET_NAME = "qcml_transfer_learning"
-    MOUNT = "/home/mount_folder"
-    os.system(f'gcsfuse {BUCKET_NAME} {MOUNT}')
-    train()

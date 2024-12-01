@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+import schnetpack.gcs_cli as cli
+import os
+
+if __name__ == "__main__":
+    BUCKET_NAME = "qcml_transfer_learning"
+    MOUNT = "/home/mount_folder"
+    os.system(f'gcsfuse {BUCKET_NAME} {MOUNT}')
+    cli.train()
