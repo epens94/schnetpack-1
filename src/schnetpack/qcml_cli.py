@@ -20,10 +20,11 @@ from schnetpack.data import BaseAtomsData, AtomsLoader
 from schnetpack.train import PredictionWriter
 from schnetpack import properties
 from schnetpack.utils import load_model
+import subprocess
+from subprocess import check_output
 
 
 log = logging.getLogger(__name__)
-
 
 OmegaConf.register_new_resolver("uuid", lambda x: str(uuid.uuid1()),use_cache=True)
 OmegaConf.register_new_resolver("tmpdir", tempfile.mkdtemp, use_cache=True)
@@ -44,8 +45,68 @@ def train(config: DictConfig):
 
     """
     print(header)
-    log.info("Running on host: " + str(socket.gethostname()))
+    if "run_gcs" in config.globals.keys():
 
+        #########
+        ## all database downloading stuff
+
+        # for my custom restarting from checkpoint from gs cloud, only use the ID
+        DB_FOLDER,CKP_FOLDER,BUCKET_NAME = "/home/data/databases","/home/checkpoints","qcml_transfer_learning"
+        # since container will always new initialized
+        os.makedirs(DB_FOLDER, exist_ok=True)
+        os.makedirs(CKP_FOLDER, exist_ok=True)
+        # download the database
+        db_name = os.path.basename(config.data.datapath)
+        db_folder = os.path.join(DB_FOLDER, db_name)
+        # for google cloud necessarcy ?
+        subprocess.check_call(['gcloud','storage','cp','-r',
+                                config.globals.db_storage_path,
+                                db_folder])
+        print("download database done")
+        config.data.datapath = db_folder
+
+        ##########
+        ## all checkpoint downloading stuff
+
+        if config.run.ckpt_path is not None:
+
+            # now we download the checkpoint from the cloud
+            command = f'gcloud storage ls gs://{BUCKET_NAME}/experiments/{config.run.ckpt_path}/checkpoints/'
+            ckpt_list = [n for n in check_output(command, shell=True, text=True).strip().split("\n") if "epoch" in n]
+
+            # which ckptoint to choose
+            tag1,tag2 = ("and_of_epoch","periodic_")
+
+            cond = {
+                tag: [int(f.split("epoch=")[-1].split(".")[0]),f]
+                for f in ckpt_list
+                for tag in (tag1, tag2)
+                if tag in f
+            }
+            # either periodic ckpt or end of epoch ckpt
+            ckpt_folder = cond[tag2][1] if cond[tag2][0] >= cond[tag1][0] else cond[tag1][1]
+
+            # download the checkpoint
+            resume_ckpt_path = os.path.join(CKP_FOLDER, os.path.basename(ckpt_folder))
+            resume_split_path = os.path.join(CKP_FOLDER,"split.npz")
+            subprocess.check_call(['gcloud','storage','cp','-r',
+                                    ckpt_folder,
+                                    resume_ckpt_path])
+            
+            # download the split file
+            command = f'gs://{BUCKET_NAME}/experiments/{config.run.ckpt_path}/split.npz'
+            subprocess.check_call(['gcloud','storage','cp', '-r',
+                                    command,
+                                    resume_split_path])
+            # update the config
+            config.data.split_file = resume_split_path
+            config.run.ckpt_path = resume_ckpt_path
+            log.info(
+                    f"Resuming from checkpoint {os.path.abspath(config.run.ckpt_path)}"
+                )
+
+
+    log.info("Running on host: " + str(socket.gethostname()))
     if OmegaConf.is_missing(config, "run.data_dir"):
         log.error(
             f"Config incomplete! You need to specify the data directory `data_dir`."
@@ -176,6 +237,10 @@ def train(config: DictConfig):
 
     # Train the model
     log.info("Starting training.")
+
+    # Handling resuming checkpoint when in the middle of training epoch stopped
+    # since the atomsmodule is not resumable
+
     if config.run.ckpt_path is not None:
 
         # manually overwrite the batch progress to ensure that all remaining indices are used
@@ -184,13 +249,14 @@ def train(config: DictConfig):
         checkpoint["loops"]["fit_loop"]["epoch_loop.batch_progress"]["current"]["ready"] = 0
 
         torch.save(checkpoint,config.run.ckpt_path)
-
+        # finish the last running epoch
         trainer.fit(model=task, datamodule=datamodule,ckpt_path=config.run.ckpt_path)
-        #exit()
-        log.info("Re-Instantiating datamodule after finishing last ran epoch")
-        ckpt_path = os.path.join(config.run.path,config.run.id,"checkpoints/ckpt_at_and_of_current_epoch.ckpt")
 
-        # Re Init everything
+        log.info("Re-Instantiating datamodule after finishing last ran epoch")
+        BASE = os.listdir(os.path.join(config.run.path,config.run.id,"checkpoints"))
+        ckpt_path = [os.path.join(BASE,f) for f in BASE if "ckpt_at_and_of" in f][0]
+
+        # Re Init everything, necessary because EMA makes problems and it is cleaner
         # Init Lightning datamodule
         log.info(f"RE-Instantiating datamodule <{config.data._target_}>")
         datamodule: LightningDataModule = hydra.utils.instantiate(
@@ -235,7 +301,11 @@ def train(config: DictConfig):
                 if "_target_" in lg_conf:
                     log.info(f"RE-Instantiating logger <{lg_conf._target_}>")
                     l = hydra.utils.instantiate(lg_conf)
-
+                    if "Wandb" in lg_conf._target_:
+                        l.config = OmegaConf.to_container(config, resolve=True)
+                        sorted_config = dict(sorted(OmegaConf.to_container(config, resolve=True).items()))
+                    else:
+                        sorted_config = config
                     logger.append(l)
 
         # Init Lightning trainer
@@ -248,7 +318,7 @@ def train(config: DictConfig):
             _convert_="partial",
             #reload_dataloaders_every_n_epochs=1
         )
-        
+        log_hyperparameters(config=sorted_config, model=task, trainer=trainer)
         trainer.fit(model=task, datamodule=datamodule, ckpt_path=ckpt_path)
         print("Done")
 
@@ -270,46 +340,13 @@ def train(config: DictConfig):
     best_task.save_model(config.globals.model_path, do_postprocessing=True)
     log.info(f"Best model stored at {os.path.abspath(config.globals.model_path)}")
 
+    # for google cloud services and using wandb
+    if "wandb" in config.logger.keys():
+        import wandb
+        wandb.finish()
 
-@hydra.main(config_path="configs", config_name="predict", version_base="1.2")
-def predict(config: DictConfig):
-    log.info(f"Load data from `{config.data.datapath}`")
-    dataset: BaseAtomsData = hydra.utils.instantiate(config.data)
-    loader = AtomsLoader(dataset, batch_size=config.batch_size, num_workers=8)
-
-    model = load_model("best_model")
-
-    class WrapperLM(LightningModule):
-        def __init__(self, model, enable_grad=config.enable_grad):
-            super().__init__()
-            self.model = model
-            self.enable_grad = enable_grad
-
-        def forward(self, x):
-            return model(x)
-
-        def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
-            torch.set_grad_enabled(self.enable_grad)
-            results = self(batch)
-            results[properties.idx_m] = batch[properties.idx][batch[properties.idx_m]]
-            results = {k: v.detach().cpu() for k, v in results.items()}
-            return results
-
-    log.info(f"Instantiating trainer <{config.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(
-        config.trainer,
-        callbacks=[
-            PredictionWriter(
-                output_dir=config.outputdir,
-                write_interval=config.write_interval,
-                write_idx=config.write_idx_m,
-            )
-        ],
-        default_root_dir=".",
-        _convert_="partial",
-    )
-    trainer.predict(
-        WrapperLM(model, config.enable_grad),
-        dataloaders=loader,
-        ckpt_path=config.ckpt_path,
-    )
+if __name__ == "__main__":
+    BUCKET_NAME = "qcml_transfer_learning"
+    MOUNT = "/home/mount_folder"
+    os.system(f'gcsfuse {BUCKET_NAME} {MOUNT}')
+    train()
