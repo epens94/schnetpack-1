@@ -58,6 +58,13 @@ def train(config: DictConfig):
         # download the database
         db_name = os.path.basename(config.data.datapath)
         db_folder = os.path.join(DB_FOLDER, db_name)
+
+        db_folder = "/home/mount_folder/databases/qcml_1.0.0_transfer_learning_split_test.db"
+        from ase.db import connect
+        with connect(db_folder) as conn:
+            print("Number of atoms in database:",len(conn))
+            for i in range(10):
+                print(conn.get(i+1).data.keys())
         # for google cloud necessarcy ?
         subprocess.check_call(['gcloud','storage','cp','-r',
                                 config.globals.db_storage_path,
