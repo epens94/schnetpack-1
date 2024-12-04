@@ -265,7 +265,7 @@ class AtomTypeSplit(SplittingStrategy):
         drawn = self.extract_indices(partition, group_ids,draw_unique_graphs)
         # add the drawn indices to the train indices only
         partition_sizes_idx[0].extend(drawn)
-
+        np.random.shuffle(partition_sizes_idx[0])
         # make sure everything is native python int for database indexing
         partition_sizes_idx = [list(map(int,idx)) for idx in partition_sizes_idx]
 
