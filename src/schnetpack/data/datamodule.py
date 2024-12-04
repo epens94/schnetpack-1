@@ -65,7 +65,9 @@ class AtomsDataModule(pl.LightningDataModule):
         cleanup_workdir_stage: Optional[str] = "test",
         splitting: Optional[SplittingStrategy] = None,
         pin_memory: Optional[bool] = False,
-        external_metadata_path: Optional[str] = None,
+        prefetch_factor: int = 2,
+        persistent_workers: bool = False,
+        external_metadata_path: Optional[str] = None
         #debug_path: Optional[str] = None    
     ):
         """
@@ -138,6 +140,8 @@ class AtomsDataModule(pl.LightningDataModule):
         self.data_workdir = data_workdir
         self.cleanup_workdir_stage = cleanup_workdir_stage
         self._pin_memory = pin_memory
+        self._prefetch_factor = prefetch_factor
+        self._persistent_workers = persistent_workers
 
         self.train_idx = None
         self.val_idx = None
@@ -426,6 +430,8 @@ class AtomsDataModule(pl.LightningDataModule):
                 batch_sampler=train_batch_sampler,
                 num_workers=self.num_workers,
                 pin_memory=self._pin_memory,
+                prefetch_factor=self._prefetch_factor,
+                persistent_workers=self._persistent_workers,
             )
             # because execution only after state dict loaded, but 
             # the loader needs to be reinitialized when the remaining indices are done
@@ -450,6 +456,8 @@ class AtomsDataModule(pl.LightningDataModule):
                 batch_sampler=train_batch_sampler,
                 num_workers=self.num_workers,
                 pin_memory=self._pin_memory,
+                prefetch_factor=self._prefetch_factor,
+                persistent_workers=self._persistent_workers,
             )
             # set the tag, now to check if 
             self.remaining_indices_processed = 1
@@ -463,6 +471,8 @@ class AtomsDataModule(pl.LightningDataModule):
                 batch_size=self.val_batch_size,
                 num_workers=self.num_val_workers,
                 pin_memory=self._pin_memory,
+                prefetch_factor=self._prefetch_factor,
+                persistent_workers=self._persistent_workers,
             )
         return self._val_dataloader
 
@@ -473,6 +483,8 @@ class AtomsDataModule(pl.LightningDataModule):
                 batch_size=self.test_batch_size,
                 num_workers=self.num_test_workers,
                 pin_memory=self._pin_memory,
+                prefetch_factor=self._prefetch_factor,
+                persistent_workers=self._persistent_workers,
             )
         return self._test_dataloader
 
