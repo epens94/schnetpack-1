@@ -188,7 +188,8 @@ def train(config: DictConfig):
         trainer.fit(model=task, datamodule=datamodule,ckpt_path=config.run.ckpt_path)
         #exit()
         log.info("Re-Instantiating datamodule after finishing last ran epoch")
-        ckpt_path = os.path.join(config.run.path,config.run.id,"checkpoints/ckpt_at_and_of_current_epoch.ckpt")
+        BASE = os.path.join(config.run.path,config.run.id,"checkpoints")
+        ckpt_path = [os.path.join(BASE,f) for f in os.listdir(BASE) if "ckpt_at_and_of" in f][0]
 
         # Re Init everything
         # Init Lightning datamodule
