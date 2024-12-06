@@ -369,18 +369,32 @@ class Distribution:
         """
         # `scale` and `alpha` must have the same type as `x`.
         # try:
-        assert (alpha >= 0).all()
-        assert (scale >= 0).all()
-        # except:
-        # print(alpha)
-        # print(scale)
-        float_dtype = x.dtype
-        assert alpha.dtype == float_dtype
-        assert scale.dtype == float_dtype
 
+
+        # if not (alpha >= 0).all() or not (scale >= 0).all():
+        #     nll = torch.tensor([10000000.0],dtype=x.dtype,device=x.device)
+
+        # else:
+        #     loss = lossfun(x, alpha, scale, approximate=False)
+        #     log_partition = torch.log(scale) + self.log_base_partition_function(alpha)
+        #     nll = torch.mean(loss + log_partition)
+        
         loss = lossfun(x, alpha, scale, approximate=False)
         log_partition = torch.log(scale) + self.log_base_partition_function(alpha)
         nll = loss + log_partition
+        
+        # if condition applies the batch is effectivly skipped.
+        if not (alpha >= 0).all() or not (scale >= 0).all():
+            nll *= 0
+
+        #assert (alpha >= 0).all()
+        #assert (scale >= 0).all()
+        # except:
+        # print(alpha)
+        # print(scale)
+        #float_dtype = x.dtype
+        #assert alpha.dtype == float_dtype
+        #assert scale.dtype == float_dtype
         return nll
 
     def draw_samples(self, alpha, scale):
