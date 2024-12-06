@@ -188,6 +188,7 @@ class AtomTypeSplit(SplittingStrategy):
         draw_indices_path: str,
         test_indices_path: str,
         external_metadata_path: str,
+        based_on: str = "conformations",
         num_draw: Union[int, float] = None,
     ):
         """
@@ -197,8 +198,10 @@ class AtomTypeSplit(SplittingStrategy):
                         For now the percentage is applied to all atomtypes.
                         Values below 1 are interpreted as percentage, values above as absolute number.
                         Conversion is done automatically.
+            based_on: to either put N graphs or N conformations in the train set.
         """
         self.num_draw = num_draw
+        self.based_on = based_on
         self.base_indices_path = base_indices_path
         self.draw_indices_path = draw_indices_path
         self.test_indices_path = test_indices_path
@@ -251,22 +254,35 @@ class AtomTypeSplit(SplittingStrategy):
             test_idx.tolist(),
             ]
 
-        # get unique graphs corresponding to draw indices and place request num_draw to train idx, putting only one conformere per graph
-        draw_unique_graphs = np.unique(group_ids[draw_indices][:,1])
-        # permutate them, they have no specific order from the start, but better to be sure
-        np.random.shuffle(draw_unique_graphs)
-        # take specified amount (either percentage or absolute number) of unique graphs
-        if self.num_draw < 1:
-            num_keep = int(math.floor(self.num_draw * draw_unique_graphs.shape[0]))
-        else:
-            num_keep = self.num_draw
+        # db indices aka conformere indices
+        if self.based_on == "conformations":
 
-        partition = range(num_keep)
-        drawn = self.extract_indices(partition, group_ids,draw_unique_graphs)
-        # add the drawn indices to the train indices only
-        partition_sizes_idx[0].extend(drawn)
+            drawn = group_ids[draw_indices][:,0]
+            np.random.shuffle(drawn)
+            add_samples = drawn[:self.num_draw]
+            partition_sizes_idx[0].extend(add_samples)
+
+
+        if self.based_on == "graphs":
+
+            # get unique graphs corresponding to draw indices and place request num_draw to train idx, putting only one conformere per graph
+            draw_unique_graphs = np.unique(group_ids[draw_indices][:,1])
+            # permutate them, they have no specific order from the start, but better to be sure
+            np.random.shuffle(draw_unique_graphs)
+            # take specified amount (either percentage or absolute number) of unique graphs
+            if self.num_draw < 1:
+                num_keep = int(math.floor(self.num_draw * draw_unique_graphs.shape[0]))
+            else:
+                num_keep = self.num_draw
+
+            partition = range(num_keep)
+            drawn = self.extract_indices(partition, group_ids,draw_unique_graphs)
+            # add the drawn indices to the train indices only
+            partition_sizes_idx[0].extend(drawn)
+            #np.random.shuffle(partition_sizes_idx[0])
+            # make sure everything is native python int for database indexing
+
         np.random.shuffle(partition_sizes_idx[0])
-        # make sure everything is native python int for database indexing
         partition_sizes_idx = [list(map(int,idx)) for idx in partition_sizes_idx]
 
         return partition_sizes_idx
