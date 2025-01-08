@@ -5,6 +5,7 @@ import tempfile
 import socket
 from typing import List
 import random
+import numpy as np
 
 import torch
 import hydra
@@ -20,6 +21,28 @@ from schnetpack.data import BaseAtomsData, AtomsLoader
 from schnetpack.train import PredictionWriter
 from schnetpack import properties
 from schnetpack.utils import load_model
+
+from pytorch_lightning.callbacks import ModelCheckpoint
+
+ModelCheckpoint.CHECKPOINT_EQUALS_CHAR = "_"
+
+def checkpoint_check(ckpt_paths):
+    remaining_indices,return_path = ({},{})
+
+    drop_keys = []
+    for ckpt_path in ckpt_paths:
+        if os.path.exists(ckpt_path):
+            ckpt = torch.load(ckpt_path,map_location="cpu")
+            gs = ckpt["global_step"]
+            ri = len(ckpt["AtomsDataModule"]["remaining_indices"] ) > 0
+            return_path[ckpt_path] = gs
+            remaining_indices[ckpt_path] = ri
+    path = max(return_path, key=return_path.get)
+    drop_keys = [k for k in return_path.keys() if k != path and os.path.basename(k) != "last.ckpt"]
+    #if len(drop_keys) > 0:
+    #    for key in drop_keys:
+    #        os.remove(key)
+    return path,remaining_indices[path]
 
 
 log = logging.getLogger(__name__)
@@ -82,6 +105,14 @@ def train(config: DictConfig):
                 config.run.ckpt_path = "checkpoints/last.ckpt"
 
         if config.run.ckpt_path is not None:
+
+            # Decide which checkpoint last or restart_epoch_step (for spot machine on gcs)
+            # per epoch and per nth step both write to same file aka they overwrite each other
+            BASE = os.path.join(config.run.path,config.run.id,"checkpoints")
+            ckpt_paths = [os.path.join(BASE,f) for f in os.listdir(BASE) if ".ckpt" in f]
+            ckpt_path,remaining_indices = checkpoint_check(ckpt_paths)
+            config.run.ckpt_path = ckpt_path
+
             log.info(
                 f"Resuming from checkpoint {os.path.abspath(config.run.ckpt_path)}"
             )
@@ -177,81 +208,122 @@ def train(config: DictConfig):
     # Train the model
     log.info("Starting training.")
     if config.run.ckpt_path is not None:
+    
+        if remaining_indices:
 
-        # manually overwrite the batch progress to ensure that all remaining indices are used
-        checkpoint = torch.load(config.run.ckpt_path,map_location="cpu")
-        checkpoint["loops"]["fit_loop"]["epoch_loop.batch_progress"]["current"]["completed"] = 0
-        checkpoint["loops"]["fit_loop"]["epoch_loop.batch_progress"]["current"]["ready"] = 0
+            # manually overwrite the batch progress to ensure that all remaining indices are used
+            checkpoint = torch.load(config.run.ckpt_path,map_location="cpu")
+            checkpoint["loops"]["fit_loop"]["epoch_loop.batch_progress"]["current"]["completed"] = 0
+            checkpoint["loops"]["fit_loop"]["epoch_loop.batch_progress"]["current"]["ready"] = 0
+            
+            # for testing
+            #checkpoint["AtomsDataModule"]["remaining_indices"] = set(list(checkpoint["AtomsDataModule"]["remaining_indices"])[:89])
+            torch.save(checkpoint,config.run.ckpt_path)
 
-        torch.save(checkpoint,config.run.ckpt_path)
+            # check if val check intervall is bigger than remaining indices, if yes disable
+            val_check_intervall = trainer.val_check_interval
+            batchsize = config.data.batch_size
+            N = len(checkpoint["AtomsDataModule"]["remaining_indices"]) // batchsize
+            if N <= val_check_intervall:
+                config.trainer.limit_val_batches = 0.0
+                config.trainer.val_check_interval = 0.0
+                config.globals.offline = True
+                log.info(f"Instantiating trainer again because remaining indices lower than val intervall")
+                trainer: Trainer = hydra.utils.instantiate(
+                    config.trainer,
+                    callbacks=callbacks,
+                    logger=logger,
+                    default_root_dir=os.path.join(config.run.id),
+                    _convert_="partial",
+                    )
 
-        trainer.fit(model=task, datamodule=datamodule,ckpt_path=config.run.ckpt_path)
-        #exit()
-        log.info("Re-Instantiating datamodule after finishing last ran epoch")
-        BASE = os.path.join(config.run.path,config.run.id,"checkpoints")
-        ckpt_path = [os.path.join(BASE,f) for f in os.listdir(BASE) if "ckpt_at_and_of" in f][0]
 
-        # Re Init everything
-        # Init Lightning datamodule
-        log.info(f"RE-Instantiating datamodule <{config.data._target_}>")
-        datamodule: LightningDataModule = hydra.utils.instantiate(
-            config.data,
-            train_sampler_cls=(
-                str2class(config.data.train_sampler_cls)
-                if config.data.train_sampler_cls
-                else None
-            )
-        )
 
-        # Init model
-        log.info(f"RE-Instantiating model <{config.model._target_}>")
-        model = hydra.utils.instantiate(config.model)
-
-        # Init LightningModule
-        log.info(f"RE-Instantiating task <{config.task._target_}>")
-        scheduler_cls = (
-            str2class(config.task.scheduler_cls) if config.task.scheduler_cls else None
-        )
-
-        task: spk.AtomisticTask = hydra.utils.instantiate(
-            config.task,
-            model=model,
-            optimizer_cls=str2class(config.task.optimizer_cls),
-            scheduler_cls=scheduler_cls,
-        )
-
-        # Init Lightning callbacks
-        callbacks: List[Callback] = []
-        if "callbacks" in config:
-            for _, cb_conf in config["callbacks"].items():
-                if "_target_" in cb_conf:
-                    log.info(f"RE-Instantiating callback <{cb_conf._target_}>")
-                    callbacks.append(hydra.utils.instantiate(cb_conf))
-
-        # Init Lightning loggers
-        logger: List[Logger] = []
-
-        if "logger" in config:
-            for _, lg_conf in config["logger"].items():
-                if "_target_" in lg_conf:
-                    log.info(f"RE-Instantiating logger <{lg_conf._target_}>")
-                    l = hydra.utils.instantiate(lg_conf)
-
-                    logger.append(l)
-
-        # Init Lightning trainer
-        log.info(f"RE-Instantiating trainer <{config.trainer._target_}>")
-        trainer: Trainer = hydra.utils.instantiate(
-            config.trainer,
-            callbacks=callbacks,
-            logger=logger,
-            default_root_dir=os.path.join(config.run.id),
-            _convert_="partial",
-            #reload_dataloaders_every_n_epochs=1
-        )
+            trainer.fit(model=task, datamodule=datamodule,ckpt_path=config.run.ckpt_path)
         
-        trainer.fit(model=task, datamodule=datamodule, ckpt_path=ckpt_path)
-        print("Done")
+        
+            log.info("Re-Instantiating datamodule after finishing last ran epoch")
+            BASE = os.path.join(config.run.path,config.run.id,"checkpoints")
+            ckpt_paths = [os.path.join(BASE,f) for f in os.listdir(BASE) if ".ckpt" in f]
+            ckpt_path,remaining_indices = checkpoint_check(ckpt_paths)
+            config.run.ckpt_path = ckpt_path
+            # Reset limit val batches to original value
+            if config.trainer.limit_val_batches == 0.0:
+                config.trainer.limit_val_batches = 1.0
+                config.trainer.val_check_interval = val_check_intervall
+                #config.globals.offline = False
+
+            # Re Init everything
+            # Init Lightning datamodule
+            # split_file = os.path.join(config.run.path,config.run.id,"split.npz")
+            # split_file = np.load(split_file).items()
+            # split = {k: v for k, v in split_file}
+            # val_idx = split["val_idx"][:800]
+            # train_idx= split["train_idx"][:400]
+            # split["val_idx"] = val_idx
+            # split["train_idx"] = train_idx
+            # np.savez(os.path.join(config.run.path,config.run.id,"split.npz"),**split)
+
+            log.info(f"RE-Instantiating datamodule <{config.data._target_}>")
+            datamodule: LightningDataModule = hydra.utils.instantiate(
+                config.data,
+                train_sampler_cls=(
+                    str2class(config.data.train_sampler_cls)
+                    if config.data.train_sampler_cls
+                    else None
+                )
+            )
+
+            # Init model
+            log.info(f"RE-Instantiating model <{config.model._target_}>")
+            model = hydra.utils.instantiate(config.model)
+
+            # Init LightningModule
+            log.info(f"RE-Instantiating task <{config.task._target_}>")
+            scheduler_cls = (
+                str2class(config.task.scheduler_cls) if config.task.scheduler_cls else None
+            )
+
+            task: spk.AtomisticTask = hydra.utils.instantiate(
+                config.task,
+                model=model,
+                optimizer_cls=str2class(config.task.optimizer_cls),
+                scheduler_cls=scheduler_cls,
+            )
+
+            # Init Lightning callbacks
+            callbacks: List[Callback] = []
+            if "callbacks" in config:
+                for _, cb_conf in config["callbacks"].items():
+                    if "_target_" in cb_conf:
+                        log.info(f"RE-Instantiating callback <{cb_conf._target_}>")
+                        callbacks.append(hydra.utils.instantiate(cb_conf))
+
+            # Init Lightning loggers
+            logger: List[Logger] = []
+
+            if "logger" in config:
+                for _, lg_conf in config["logger"].items():
+                    if "_target_" in lg_conf:
+                        log.info(f"RE-Instantiating logger <{lg_conf._target_}>")
+                        l = hydra.utils.instantiate(lg_conf)
+
+                        logger.append(l)
+
+            # Init Lightning trainer
+            log.info(f"RE-Instantiating trainer <{config.trainer._target_}>")
+            trainer: Trainer = hydra.utils.instantiate(
+                config.trainer,
+                callbacks=callbacks,
+                logger=logger,
+                default_root_dir=os.path.join(config.run.id),
+                _convert_="partial",
+                #reload_dataloaders_every_n_epochs=1
+            )
+            trainer.fit(model=task, datamodule=datamodule, ckpt_path=ckpt_path)
+            print("Done")
+        else:
+            trainer.fit(model=task, datamodule=datamodule, ckpt_path=ckpt_path)
 
     else:
         trainer.fit(model=task, datamodule=datamodule, ckpt_path=None)
@@ -276,6 +348,9 @@ def train(config: DictConfig):
 def predict(config: DictConfig):
     log.info(f"Load data from `{config.data.datapath}`")
     dataset: BaseAtomsData = hydra.utils.instantiate(config.data)
+    if config.subset_idx is not None:
+        subset_idx = np.load(config.subset_idx).tolist()[:100]
+        dataset.subset_idx = subset_idx
     loader = AtomsLoader(dataset, batch_size=config.batch_size, num_workers=8)
 
     model = load_model("best_model")

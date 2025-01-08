@@ -310,6 +310,7 @@ class Distribution:
             self._spline_x_scale = torch.tensor(f["x_scale"])
             self._spline_values = torch.tensor(f["values"])
             self._spline_tangents = torch.tensor(f["tangents"])
+        #self.test_case = 0
 
     def log_base_partition_function(self, alpha):
         r"""Approximate the distribution's log-partition function with a 1D spline.
@@ -379,9 +380,17 @@ class Distribution:
         #     log_partition = torch.log(scale) + self.log_base_partition_function(alpha)
         #     nll = torch.mean(loss + log_partition)
         
-        loss = lossfun(x, alpha, scale, approximate=False)
-        log_partition = torch.log(scale) + self.log_base_partition_function(alpha)
-        nll = loss + log_partition
+        # if condition applies the batch is effectivly skipped.
+        # if self.test_case == 3:
+        #     alpha *= -1
+        #     self.test_case = 0
+        if not (alpha >= 0).all() or not (scale >= 0).all():
+            nll = x * 0
+
+        else:
+            loss = lossfun(x, alpha, scale, approximate=False)
+            log_partition = torch.log(scale) + self.log_base_partition_function(alpha)
+            nll = loss + log_partition
         
         # if condition applies the batch is effectivly skipped.
         if not (alpha >= 0).all() or not (scale >= 0).all():
@@ -395,6 +404,7 @@ class Distribution:
         #float_dtype = x.dtype
         #assert alpha.dtype == float_dtype
         #assert scale.dtype == float_dtype
+        #self.test_case += 1
         return nll
 
     def draw_samples(self, alpha, scale):
